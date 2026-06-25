@@ -7,10 +7,13 @@ final class WindowMonitor {
     static let shared = WindowMonitor()
 
     private var eventTapMonitor: CGEventTapMonitor?
+    private var fallbackMouseMonitor: Any?
+    private var fallbackLocalMonitor: Any?
     private var draggedWindow: AXUIElement?
     private var draggedBundleID: String?
     private var initialWindowFrame: CGRect?
     private var isCommandDragActive = false
+    private var isLeftMouseDown = false
     private var windowLookupAttempts = 0
     private weak var zoneManager: ZoneManager?
     private var overlayWindows: [CGDirectDisplayID: ZoneOverlayWindow] = [:]
@@ -28,6 +31,7 @@ final class WindowMonitor {
     func stop() {
         eventTapMonitor?.stop()
         eventTapMonitor = nil
+        stopFallbackMonitors()
         endCommandDragSession(snap: false)
         hideAllPreviews()
         overlayWindows.values.forEach { $0.orderOut(nil) }
@@ -45,45 +49,88 @@ final class WindowMonitor {
     // MARK: - Event tap
 
     private func startEventTap() {
+        eventTapMonitor?.stop()
+        eventTapMonitor = nil
+
         let monitor = CGEventTapMonitor(eventTypes: [
             .leftMouseDown,
             .leftMouseDragged,
             .leftMouseUp,
             .flagsChanged
         ]) { [weak self] event, type in
-            Task { @MainActor in
+            DispatchQueue.main.async {
                 self?.handleCGEvent(event, type: type)
             }
         }
 
         if monitor.start() {
             eventTapMonitor = monitor
+            stopFallbackMonitors()
+        } else {
+            startFallbackMonitors()
+        }
+    }
+
+    private func startFallbackMonitors() {
+        guard fallbackMouseMonitor == nil else { return }
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .flagsChanged]
+        fallbackMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.handleNSEvent(event)
+        }
+        fallbackLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.handleNSEvent(event)
+            return event
+        }
+    }
+
+    private func stopFallbackMonitors() {
+        if let monitor = fallbackMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            fallbackMouseMonitor = nil
+        }
+        if let monitor = fallbackLocalMonitor {
+            NSEvent.removeMonitor(monitor)
+            fallbackLocalMonitor = nil
         }
     }
 
     @MainActor
-    private func handleCGEvent(_ event: CGEvent, type: CGEventType) {
-        guard let zoneManager, zoneManager.snappingEnabled, zoneManager.isAccessibilityGranted else { return }
+    private func handleNSEvent(_ event: NSEvent) {
+        guard let cgEvent = event.cgEvent else { return }
+        let type: CGEventType
+        switch event.type {
+        case .leftMouseDown: type = .leftMouseDown
+        case .leftMouseDragged: type = .leftMouseDragged
+        case .leftMouseUp: type = .leftMouseUp
+        case .flagsChanged: type = .flagsChanged
+        default: return
+        }
+        handleCGEvent(cgEvent, type: type)
+    }
 
-        let point = event.appKitScreenPoint
+    var isListeningForDragEvents: Bool {
+        eventTapMonitor?.isRunning == true || fallbackMouseMonitor != nil
+    }
+
+    @MainActor
+    private func handleCGEvent(_ event: CGEvent, type: CGEventType) {
+        guard let zoneManager, zoneManager.snappingEnabled else { return }
+
+        if !isListeningForDragEvents {
+            startEventTap()
+        }
+
+        let point = pointerLocation(for: event, type: type)
 
         switch type {
         case .leftMouseDown:
+            isLeftMouseDown = true
             windowLookupAttempts = 0
-            if let window = WindowAccessibility.windowElementUnderCursor(at: point),
-               !isUserTyping(in: window) {
-                draggedWindow = window
-                draggedBundleID = bundleIdentifier(for: window)
-                initialWindowFrame = WindowAccessibility.windowFrame(window)
-            } else {
-                draggedWindow = nil
-                draggedBundleID = nil
-                initialWindowFrame = nil
-            }
+            captureDraggedWindow(at: point)
 
         case .leftMouseDragged:
+            isLeftMouseDown = true
             resolveDraggedWindowIfNeeded(at: point)
-            guard draggedWindow != nil else { return }
             if event.isCommandPressed {
                 beginCommandDragIfNeeded()
                 continueCommandDrag(at: point)
@@ -92,21 +139,27 @@ final class WindowMonitor {
             }
 
         case .leftMouseUp:
+            isLeftMouseDown = false
+            resolveDraggedWindowIfNeeded(at: point)
+            if draggedWindow == nil {
+                draggedWindow = WindowAccessibility.frontmostWindow()
+                draggedBundleID = draggedWindow.flatMap { bundleIdentifier(for: $0) }
+            }
             if isCommandDragActive {
-                endCommandDragSession(snap: true, at: point)
+                endCommandDragSession(snap: zoneManager.isAccessibilityGranted, at: point)
             } else {
                 endCommandDragSession(snap: false)
             }
             resetDragState()
 
         case .flagsChanged:
-            if draggedWindow != nil {
-                if event.isCommandPressed {
-                    beginCommandDragIfNeeded()
-                    continueCommandDrag(at: point)
-                } else if isCommandDragActive {
-                    cancelCommandDragPreview()
-                }
+            guard isLeftMouseDown else { return }
+            resolveDraggedWindowIfNeeded(at: point)
+            if event.isCommandPressed {
+                beginCommandDragIfNeeded()
+                continueCommandDrag(at: point)
+            } else if isCommandDragActive {
+                cancelCommandDragPreview()
             }
 
         default:
@@ -114,11 +167,41 @@ final class WindowMonitor {
         }
     }
 
+    private func pointerLocation(for event: CGEvent, type: CGEventType) -> NSPoint {
+        if type == .flagsChanged {
+            return NSEvent.mouseLocation
+        }
+        return event.appKitScreenPoint
+    }
+
+    private func captureDraggedWindow(at point: NSPoint) {
+        if let window = WindowAccessibility.windowElementUnderCursor(at: point),
+           !isUserTyping(in: window) {
+            draggedWindow = window
+            draggedBundleID = bundleIdentifier(for: window)
+            initialWindowFrame = WindowAccessibility.windowFrame(window)
+        } else if let window = WindowAccessibility.frontmostWindow(),
+                  !isUserTyping(in: window) {
+            draggedWindow = window
+            draggedBundleID = bundleIdentifier(for: window)
+            initialWindowFrame = WindowAccessibility.windowFrame(window)
+        } else {
+            draggedWindow = nil
+            draggedBundleID = nil
+            initialWindowFrame = nil
+        }
+    }
+
     private func resolveDraggedWindowIfNeeded(at point: NSPoint) {
-        guard draggedWindow == nil, windowLookupAttempts < 20 else { return }
+        guard draggedWindow == nil, windowLookupAttempts < 30 else { return }
         windowLookupAttempts += 1
         if let window = WindowAccessibility.windowElementUnderCursor(at: point),
            !isUserTyping(in: window) {
+            draggedWindow = window
+            draggedBundleID = bundleIdentifier(for: window)
+            initialWindowFrame = WindowAccessibility.windowFrame(window)
+        } else if windowLookupAttempts > 5, let window = WindowAccessibility.frontmostWindow(),
+                  !isUserTyping(in: window) {
             draggedWindow = window
             draggedBundleID = bundleIdentifier(for: window)
             initialWindowFrame = WindowAccessibility.windowFrame(window)
@@ -130,11 +213,12 @@ final class WindowMonitor {
         draggedBundleID = nil
         initialWindowFrame = nil
         windowLookupAttempts = 0
+        isLeftMouseDown = false
     }
 
     @MainActor
     private func beginCommandDragIfNeeded() {
-        guard !isCommandDragActive, draggedWindow != nil else { return }
+        guard !isCommandDragActive else { return }
         isCommandDragActive = true
     }
 

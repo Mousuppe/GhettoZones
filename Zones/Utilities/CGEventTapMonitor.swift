@@ -36,7 +36,7 @@ final class CGEventTapMonitor {
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: eventMask,
             callback: Self.eventTapCallback,
             userInfo: userInfo

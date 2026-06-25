@@ -11,6 +11,31 @@ enum WindowAccessibility {
         return windowFromWindowList(at: point)
     }
 
+    /// Focused window of the frontmost app — fallback while dragging.
+    static func frontmostWindow() -> AXUIElement? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var appRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedApplicationAttribute as CFString,
+            &appRef
+        ) == .success,
+              let appRef else { return nil }
+
+        let app = appRef as! AXUIElement
+        var windowRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
+           let windowRef {
+            let window = windowRef as! AXUIElement
+            if isStandardWindow(window) { return window }
+        }
+
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let windows = windowsRef as? [AXUIElement] else { return nil }
+        return windows.first(where: isStandardWindow(_:))
+    }
+
     private static func windowFromAccessibility(at point: NSPoint) -> AXUIElement? {
         let systemWide = AXUIElementCreateSystemWide()
         var element: AXUIElement?
@@ -26,25 +51,39 @@ enum WindowAccessibility {
     }
 
     private static func resolveWindow(from element: AXUIElement) -> AXUIElement? {
-        var roleRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
-           let role = roleRef as? String,
-           role == kAXWindowRole {
-            return isStandardWindow(element) ? element : nil
-        }
+        var current: AXUIElement? = element
+        for _ in 0..<25 {
+            guard let el = current else { break }
 
-        var windowRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &windowRef) == .success,
-           let windowRef {
-            let window = windowRef as! AXUIElement
-            return isStandardWindow(window) ? window : nil
-        }
+            var roleRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &roleRef) == .success,
+               let role = roleRef as? String,
+               role == kAXWindowRole,
+               isStandardWindow(el) {
+                return el
+            }
 
-        var topLevelRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXTopLevelUIElementAttribute as CFString, &topLevelRef) == .success,
-           let topLevelRef {
-            let topLevel = topLevelRef as! AXUIElement
-            if isStandardWindow(topLevel) { return topLevel }
+            var windowRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(el, kAXWindowAttribute as CFString, &windowRef) == .success,
+               let windowRef {
+                let window = windowRef as! AXUIElement
+                if isStandardWindow(window) { return window }
+            }
+
+            var topLevelRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(el, kAXTopLevelUIElementAttribute as CFString, &topLevelRef) == .success,
+               let topLevelRef {
+                let topLevel = topLevelRef as! AXUIElement
+                if isStandardWindow(topLevel) { return topLevel }
+            }
+
+            var parentRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(el, kAXParentAttribute as CFString, &parentRef) == .success,
+               let parentRef {
+                current = (parentRef as! AXUIElement)
+            } else {
+                break
+            }
         }
 
         return nil
@@ -56,7 +95,7 @@ enum WindowAccessibility {
             return nil
         }
 
-        let mainHeight = NSScreen.screens.map(\.frame.maxY).max() ?? NSScreen.main?.frame.maxY ?? 0
+        let quartzPoint = point.quartzScreenPoint
 
         for info in infoList {
             guard let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat],
@@ -70,18 +109,21 @@ enum WindowAccessibility {
                 continue
             }
 
+            let quartzBounds = CGRect(x: x, y: y, width: width, height: height)
+            guard quartzBounds.contains(CGPoint(x: quartzPoint.x, y: quartzPoint.y)) else { continue }
+
+            if let ownerName = info[kCGWindowOwnerName as String] as? String,
+               ["Dock", "WindowManager", "GhettoZones"].contains(ownerName) {
+                continue
+            }
+
+            let mainHeight = NSScreen.screens.map(\.frame.maxY).max() ?? NSScreen.main?.frame.maxY ?? 0
             let appKitBounds = CGRect(
                 x: x,
                 y: mainHeight - y - height,
                 width: width,
                 height: height
             )
-            guard appKitBounds.contains(point) else { continue }
-
-            if let ownerName = info[kCGWindowOwnerName as String] as? String,
-               ["Dock", "WindowManager", "GhettoZones"].contains(ownerName) {
-                continue
-            }
 
             if let window = windowElement(for: ownerPID, expectedBounds: appKitBounds) {
                 return window
@@ -108,7 +150,7 @@ enum WindowAccessibility {
         return windows.first(where: isStandardWindow(_:))
     }
 
-    private static func framesMatch(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat = 2) -> Bool {
+    private static func framesMatch(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat = 4) -> Bool {
         abs(lhs.origin.x - rhs.origin.x) <= tolerance
             && abs(lhs.origin.y - rhs.origin.y) <= tolerance
             && abs(lhs.width - rhs.width) <= tolerance
