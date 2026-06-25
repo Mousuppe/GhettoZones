@@ -64,6 +64,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shortcutManager.register(zoneManager: zoneManager)
             zoneManager.restoreRememberedPositions()
         }
+
+        NotificationCenter.default.publisher(for: .accessibilityPermissionGranted)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                WindowMonitor.shared.start(zoneManager: self.zoneManager)
+                self.zoneManager.restoreRememberedPositions()
+            }
+            .store(in: &cancellables)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

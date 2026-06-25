@@ -25,9 +25,35 @@ final class ZoneManager: ObservableObject {
     init(displayManager: DisplayManager) {
         self.displayManager = displayManager
         loadData()
+        startPermissionMonitoring()
         displayManager.$displays
             .sink { [weak self] displays in
                 self?.ensureLayoutsForDisplays(displays)
+            }
+            .store(in: &cancellables)
+    }
+
+    func startPermissionMonitoring() {
+        refreshPermissionState()
+
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                self?.refreshPermissionState()
+            }
+            .store(in: &cancellables)
+
+        DistributedNotificationCenter.default().publisher(for: Notification.Name("com.apple.accessibility.api"))
+            .merge(with: DistributedNotificationCenter.default().publisher(for: Notification.Name("com.apple.accessibility.auth.status")))
+            .sink { [weak self] _ in
+                self?.refreshPermissionState()
+            }
+            .store(in: &cancellables)
+
+        Timer.publish(every: 1.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self, !self.isAccessibilityGranted else { return }
+                self.refreshPermissionState()
             }
             .store(in: &cancellables)
     }
@@ -42,8 +68,13 @@ final class ZoneManager: ObservableObject {
     }
 
     func refreshPermissionState() {
-        isAccessibilityGranted = AXIsProcessTrusted()
-        permissionWarning = !isAccessibilityGranted
+        let granted = AXIsProcessTrusted()
+        let previouslyGranted = isAccessibilityGranted
+        isAccessibilityGranted = granted
+        permissionWarning = !granted
+        if granted && !previouslyGranted {
+            NotificationCenter.default.post(name: .accessibilityPermissionGranted, object: nil)
+        }
     }
 
     func requestAccessibility() {
@@ -208,6 +239,10 @@ final class ZoneManager: ObservableObject {
             )
         }
     }
+}
+
+extension Notification.Name {
+    static let accessibilityPermissionGranted = Notification.Name("accessibilityPermissionGranted")
 }
 
 enum ZoneDirection {

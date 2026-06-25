@@ -1,3 +1,4 @@
+import AppKit
 import KeyboardShortcuts
 import SwiftUI
 
@@ -55,9 +56,6 @@ struct SettingsView: View {
                     if !zoneManager.isAccessibilityGranted {
                         Button(NSLocalizedString("Grant Access", comment: "Open accessibility settings")) {
                             zoneManager.requestAccessibility()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                                zoneManager.refreshPermissionState()
-                            }
                         }
                         Button(NSLocalizedString("Open Settings", comment: "Open system settings")) {
                             zoneManager.openAccessibilitySettings()
@@ -65,12 +63,29 @@ struct SettingsView: View {
                     }
                 }
 
-                Text(NSLocalizedString("GhettoZones needs Accessibility access to move and resize windows.", comment: "Accessibility explanation"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if zoneManager.isAccessibilityGranted {
+                    Text(NSLocalizedString("Accessibility access is enabled.", comment: "Accessibility granted message"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(NSLocalizedString("GhettoZones needs Accessibility access to move and resize windows.", comment: "Accessibility explanation"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(NSLocalizedString("If you already enabled GhettoZones in System Settings, toggle it off and on, then switch back here — or quit and reopen the app.", comment: "Accessibility troubleshooting"))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Text(Bundle.main.bundlePath)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
+                }
             }
         }
         .formStyle(.grouped)
+        .onAppear { zoneManager.refreshPermissionState() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            zoneManager.refreshPermissionState()
+        }
     }
 
     private var shortcutsTab: some View {
