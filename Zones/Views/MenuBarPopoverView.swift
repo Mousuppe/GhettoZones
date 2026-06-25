@@ -46,7 +46,12 @@ struct MenuBarPopoverView: View {
             }
 
             Toggle(NSLocalizedString("Snapping Enabled", comment: "Snapping toggle"), isOn: $zoneManager.snappingEnabled)
-                .disabled(!zoneManager.isAccessibilityGranted)
+
+            if zoneManager.snappingEnabled && !zoneManager.isAccessibilityGranted {
+                Text(NSLocalizedString("Grant Accessibility access in Settings to enable snapping.", comment: "Snapping blocked without accessibility"))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
 
             Divider()
 

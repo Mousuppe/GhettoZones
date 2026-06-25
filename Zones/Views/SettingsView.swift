@@ -29,7 +29,6 @@ struct SettingsView: View {
         Form {
             Section {
                 Toggle(NSLocalizedString("Enable Snapping", comment: "Settings toggle"), isOn: $zoneManager.snappingEnabled)
-                    .disabled(!zoneManager.isAccessibilityGranted)
 
                 HStack {
                     Text(NSLocalizedString("Activation Threshold", comment: "Drag threshold setting"))

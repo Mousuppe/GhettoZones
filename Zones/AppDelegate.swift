@@ -205,7 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Accessibility
 
     private func showAccessibilityPromptIfNeeded() {
-        guard !AXIsProcessTrusted() else { return }
+        guard !AccessibilityChecker.isGranted() else { return }
         let alert = NSAlert()
         alert.messageText = NSLocalizedString("Accessibility Permission Required", comment: "Accessibility alert title")
         alert.informativeText = CodeSigningHelper.isAdHocSigned

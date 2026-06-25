@@ -15,7 +15,7 @@ final class ZoneManager: ObservableObject {
         didSet { Defaults[.activationThresholdMs] = activationThresholdMs }
     }
     @Published var highlightedZoneID: UUID?
-    @Published var isAccessibilityGranted: Bool = AXIsProcessTrusted()
+    @Published var isAccessibilityGranted: Bool = AccessibilityChecker.isGranted()
     @Published var permissionWarning: Bool = false
 
     let displayManager: DisplayManager
@@ -68,7 +68,7 @@ final class ZoneManager: ObservableObject {
     }
 
     func refreshPermissionState() {
-        let granted = AXIsProcessTrusted()
+        let granted = AccessibilityChecker.isGranted()
         let previouslyGranted = isAccessibilityGranted
         isAccessibilityGranted = granted
         permissionWarning = !granted

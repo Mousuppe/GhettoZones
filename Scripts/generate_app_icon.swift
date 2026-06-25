@@ -90,4 +90,15 @@ let contents = """
 """
 
 try contents.write(to: outputDir.appendingPathComponent("Contents.json"), atomically: true, encoding: .utf8)
+
+let icnsOutput = outputDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("AppIcon.icns")
+let iconsetPath = FileManager.default.temporaryDirectory.appendingPathComponent("GhettoZones.iconset", isDirectory: true)
+try? FileManager.default.removeItem(at: iconsetPath)
+try FileManager.default.copyItem(at: outputDir, to: iconsetPath)
+let process = Process()
+process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
+process.arguments = ["-c", "icns", iconsetPath.path, "-o", icnsOutput.path]
+try process.run()
+process.waitUntilExit()
 print("Generated app icons in \(outputDir.path)")
+print("Generated AppIcon.icns at \(icnsOutput.path)")
