@@ -60,11 +60,12 @@ If snapping stays disabled, open **Settings…** from the menu bar popover and c
 
 ### 5. Snap your first window
 
-**Drag to snap**
+**Option + drag to snap**
 
-1. Click and drag any window by its title bar.
-2. Move the cursor into a zone and hold briefly (default **300 ms**) until the zone highlights.
-3. Release the mouse — the window fills that zone.
+1. Click and drag a window by its title bar.
+2. While dragging, hold **⌥ Option** — all zones appear at low opacity on your display.
+3. Drag the cursor over the zone you want (it highlights brighter).
+4. Release the mouse — the window snaps to that zone.
 
 **Keyboard shortcuts**
 
@@ -88,7 +89,7 @@ Layouts are saved to `~/Library/Application Support/Zones/layouts.json`. GhettoZ
 | Problem | Fix |
 |---------|-----|
 | Snapping does nothing | Check **Accessibility** is enabled for GhettoZones |
-| No zone highlight while dragging | Confirm **Snapping Enabled** is on; try holding the cursor in the zone a bit longer |
+| No zone highlight while dragging | Hold **⌥ Option** while dragging; confirm **Snapping Enabled** is on |
 | `xcodebuild` fails | Install full **Xcode** from the App Store (Command Line Tools alone are not enough) |
 | App not in menu bar | Look for the grid icon near the clock; the app has no Dock icon by design |
 
@@ -120,7 +121,7 @@ open GhettoZones.xcodeproj
 
 ## Features
 
-- **Drag-to-snap** — global mouse monitoring with configurable activation threshold
+- **Option + drag to snap** — hold ⌥ while dragging to preview all zones and drop into one
 - **Keyboard shortcuts** — ⌥+arrows, ⌥+1–9, ⌥+⇧+arrows (all remappable in Settings)
 - **Custom layouts** — visual zone editor with draw, resize, rename, and delete
 - **5 built-in presets** — halves, thirds, quarters, primary+sidebar, focus

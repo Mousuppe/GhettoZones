@@ -18,11 +18,15 @@ struct MenuBarPopoverView: View {
         zoneManager.activeLayoutID(for: mainDisplayID)
     }
 
+    private var activeLayout: ZoneLayout? {
+        guard let selectedLayoutID else { return availableLayouts.first }
+        return availableLayouts.first { $0.id == selectedLayoutID }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: "square.split.2x2")
-                    .foregroundStyle(.secondary)
+                LayoutIconView(layout: activeLayout)
                 Text(NSLocalizedString("GhettoZones", comment: "App name in popover"))
                     .font(.headline)
                 if zoneManager.permissionWarning {

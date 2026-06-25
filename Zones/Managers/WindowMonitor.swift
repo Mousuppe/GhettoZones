@@ -2,19 +2,19 @@ import AppKit
 import ApplicationServices
 import Combine
 
+@MainActor
 final class WindowMonitor {
     static let shared = WindowMonitor()
 
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
-    private var dragStartPoint: NSPoint?
     private var draggedWindow: AXUIElement?
     private var draggedBundleID: String?
-    private var activationTimer: Timer?
-    private var pendingZoneID: UUID?
-    private var isDragging = false
+    private var isMouseDragging = false
+    private var isOptionDragActive = false
     private weak var zoneManager: ZoneManager?
     private var overlayWindows: [CGDirectDisplayID: ZoneOverlayWindow] = [:]
+    private var previewDisplayID: CGDirectDisplayID?
 
     private init() {}
 
@@ -22,12 +22,14 @@ final class WindowMonitor {
         self.zoneManager = zoneManager
         stop()
         setupOverlayWindows()
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
+
+        let events: NSEvent.EventTypeMask = [.leftMouseDragged, .leftMouseUp, .flagsChanged]
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: events) { [weak self] event in
             Task { @MainActor in
                 self?.handleMouseEvent(event)
             }
         }
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
             Task { @MainActor in
                 self?.handleMouseEvent(event)
             }
@@ -44,17 +46,20 @@ final class WindowMonitor {
             NSEvent.removeMonitor(monitor)
             localMouseMonitor = nil
         }
-        activationTimer?.invalidate()
-        activationTimer = nil
-        hideAllHighlights()
+        endOptionDragSession(snap: false)
+        hideAllPreviews()
         overlayWindows.values.forEach { $0.orderOut(nil) }
         overlayWindows.removeAll()
         draggedWindow = nil
-        isDragging = false
+        isMouseDragging = false
+        isOptionDragActive = false
     }
 
     func refreshOverlays() {
         setupOverlayWindows()
+        if isOptionDragActive {
+            updateZonePreview(at: NSEvent.mouseLocation)
+        }
     }
 
     // MARK: - Mouse handling
@@ -65,78 +70,112 @@ final class WindowMonitor {
 
         switch event.type {
         case .leftMouseDragged:
-            if !isDragging {
-                beginDragIfNeeded(at: NSEvent.mouseLocation)
-            }
-            if isDragging {
-                continueDrag(at: NSEvent.mouseLocation)
+            isMouseDragging = true
+            if isOptionPressed(for: event) {
+                beginOptionDragIfNeeded()
+                continueOptionDrag(at: NSEvent.mouseLocation)
+            } else if isOptionDragActive {
+                cancelOptionDragPreview()
             }
         case .leftMouseUp:
-            if isDragging {
-                endDrag(at: NSEvent.mouseLocation)
+            if isOptionDragActive && isOptionPressed(for: event) {
+                endOptionDragSession(snap: true, at: NSEvent.mouseLocation)
+            } else {
+                endOptionDragSession(snap: false)
+            }
+            isMouseDragging = false
+        case .flagsChanged:
+            if isMouseDragging {
+                if isOptionPressed(for: event) {
+                    beginOptionDragIfNeeded()
+                    continueOptionDrag(at: NSEvent.mouseLocation)
+                } else if isOptionDragActive {
+                    cancelOptionDragPreview()
+                }
             }
         default:
             break
         }
     }
 
+    private func isOptionPressed(for event: NSEvent) -> Bool {
+        event.modifierFlags.contains(.option)
+    }
+
     @MainActor
-    private func beginDragIfNeeded(at point: NSPoint) {
+    private func beginOptionDragIfNeeded() {
+        guard !isOptionDragActive else { return }
         guard let window = focusedWindowElement(), !isUserTyping(in: window) else { return }
         draggedWindow = window
         draggedBundleID = bundleIdentifier(for: window)
-        dragStartPoint = point
-        isDragging = true
+        isOptionDragActive = true
     }
 
     @MainActor
-    private func continueDrag(at point: NSPoint) {
-        guard isDragging, let zoneManager else { return }
-        guard let display = zoneManager.displayManager.display(for: point) else {
-            cancelActivation()
-            zoneManager.highlightedZoneID = nil
-            hideAllHighlights()
-            return
-        }
-
-        if let zone = zoneManager.zone(at: point, on: display.id) {
-            if pendingZoneID != zone.id {
-                cancelActivation()
-                pendingZoneID = zone.id
-                let threshold = Double(zoneManager.activationThresholdMs) / 1000.0
-                activationTimer = Timer.scheduledTimer(withTimeInterval: threshold, repeats: false) { [weak self] _ in
-                    Task { @MainActor in
-                        zoneManager.highlightedZoneID = zone.id
-                        self?.showHighlight(zone: zone, displayID: display.id)
-                    }
-                }
-            }
-        } else {
-            cancelActivation()
-            zoneManager.highlightedZoneID = nil
-            hideAllHighlights()
-        }
+    private func continueOptionDrag(at point: NSPoint) {
+        guard isOptionDragActive else { return }
+        updateZonePreview(at: point)
     }
 
     @MainActor
-    private func endDrag(at point: NSPoint) {
+    private func cancelOptionDragPreview() {
+        zoneManager?.highlightedZoneID = nil
+        previewDisplayID = nil
+        hideAllPreviews()
+        isOptionDragActive = false
+        draggedWindow = nil
+        draggedBundleID = nil
+    }
+
+    @MainActor
+    private func endOptionDragSession(snap: Bool, at point: NSPoint? = nil) {
         defer {
-            isDragging = false
+            zoneManager?.highlightedZoneID = nil
+            previewDisplayID = nil
+            hideAllPreviews()
+            isOptionDragActive = false
             draggedWindow = nil
             draggedBundleID = nil
-            dragStartPoint = nil
-            cancelActivation()
-            zoneManager?.highlightedZoneID = nil
-            hideAllHighlights()
         }
 
-        guard let zoneManager, let window = draggedWindow else { return }
-        guard let display = zoneManager.displayManager.display(for: point),
+        guard snap,
+              let zoneManager,
+              let window = draggedWindow,
+              let point,
+              let display = zoneManager.displayManager.display(for: point),
               let zone = zoneManager.zone(at: point, on: display.id),
-              zoneManager.highlightedZoneID == zone.id,
               let layout = zoneManager.activeLayout(for: display.id) else { return }
 
         snapWindow(window, to: zone, displayID: display.id, zoneManager: zoneManager, layout: layout)
+    }
+
+    @MainActor
+    private func updateZonePreview(at point: NSPoint) {
+        guard let zoneManager,
+              let display = zoneManager.displayManager.display(for: point),
+              let layout = zoneManager.activeLayout(for: display.id) else {
+            zoneManager?.highlightedZoneID = nil
+            hideAllPreviews()
+            return
+        }
+
+        previewDisplayID = display.id
+
+        let zoneFrames = layout.zones.compactMap {
+            zoneManager.displayManager.absoluteFrame(for: $0, on: display.id)
+        }
+        let hoveredZone = zoneManager.zone(at: point, on: display.id)
+        let hoveredIndex = hoveredZone.flatMap { zone in layout.zones.firstIndex(where: { $0.id == zone.id }) }
+
+        zoneManager.highlightedZoneID = hoveredZone?.id
+
+        for (displayID, overlay) in overlayWindows {
+            if displayID == display.id {
+                overlay.showZonePreview(ZoneOverlayPreview(zoneFrames: zoneFrames, hoveredIndex: hoveredIndex))
+            } else {
+                overlay.hidePreview()
+            }
+        }
     }
 
     // MARK: - Snapping
@@ -232,23 +271,8 @@ final class WindowMonitor {
     }
 
     @MainActor
-    private func showHighlight(zone: Zone, displayID: CGDirectDisplayID) {
-        guard let zoneManager,
-              let absolute = zoneManager.displayManager.absoluteFrame(for: zone, on: displayID),
-              let overlay = overlayWindows[displayID] else { return }
-        overlay.showZoneHighlight(frame: absolute)
-    }
-
-    @MainActor
-    private func hideAllHighlights() {
-        overlayWindows.values.forEach { $0.hideHighlight() }
-    }
-
-    @MainActor
-    private func cancelActivation() {
-        activationTimer?.invalidate()
-        activationTimer = nil
-        pendingZoneID = nil
+    private func hideAllPreviews() {
+        overlayWindows.values.forEach { $0.hidePreview() }
     }
 
     // MARK: - AX helpers

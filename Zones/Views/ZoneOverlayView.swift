@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+struct ZoneOverlayPreview {
+    var zoneFrames: [CGRect] = []
+    var hoveredIndex: Int?
+}
+
 final class ZoneOverlayWindow: NSWindow {
     private var hostingView: NSHostingView<ZoneOverlayContent>?
 
@@ -9,17 +14,16 @@ final class ZoneOverlayWindow: NSWindow {
             contentRect: screen.frame,
             styleMask: [.borderless],
             backing: .buffered,
-            defer: false,
-            screen: screen
+            defer: false
         )
+        setFrame(screen.frame, display: true)
         level = .screenSaver
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
         ignoresMouseEvents = true
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        let content = ZoneOverlayContent(highlightFrame: nil)
-        let hosting = NSHostingView(rootView: content)
+        let hosting = NSHostingView(rootView: ZoneOverlayContent(preview: ZoneOverlayPreview()))
         hostingView = hosting
         contentView = hosting
     }
@@ -28,35 +32,39 @@ final class ZoneOverlayWindow: NSWindow {
         setFrame(screen.frame, display: true)
     }
 
-    func showZoneHighlight(frame: CGRect) {
+    func showZonePreview(_ preview: ZoneOverlayPreview) {
         guard let hostingView else { return }
-        hostingView.rootView = ZoneOverlayContent(highlightFrame: frame)
+        hostingView.rootView = ZoneOverlayContent(preview: preview)
         orderFrontRegardless()
     }
 
-    func hideHighlight() {
+    func hidePreview() {
         guard let hostingView else { return }
-        hostingView.rootView = ZoneOverlayContent(highlightFrame: nil)
+        hostingView.rootView = ZoneOverlayContent(preview: ZoneOverlayPreview())
+        orderOut(nil)
     }
 }
 
 struct ZoneOverlayContent: View {
-    let highlightFrame: CGRect?
+    let preview: ZoneOverlayPreview
 
     var body: some View {
         GeometryReader { geometry in
-            if let frame = highlightFrame {
+            ForEach(Array(preview.zoneFrames.enumerated()), id: \.offset) { index, frame in
                 let local = convertToLocal(frame: frame, in: geometry.size)
+                let isHovered = preview.hoveredIndex == index
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.accentColor.opacity(0.25))
+                    .fill(Color.accentColor.opacity(isHovered ? 0.35 : 0.15))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(Color.accentColor, lineWidth: 2)
+                            .strokeBorder(
+                                Color.accentColor.opacity(isHovered ? 1 : 0.5),
+                                lineWidth: isHovered ? 2 : 1
+                            )
                     )
                     .frame(width: local.width, height: local.height)
                     .position(x: local.midX, y: local.midY)
-                    .transition(.opacity)
-                    .animation(.spring(response: 0.2, dampingFraction: 0.7), value: highlightFrame)
+                    .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isHovered)
             }
         }
         .allowsHitTesting(false)

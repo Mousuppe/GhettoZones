@@ -14,6 +14,7 @@ final class AppState: ObservableObject {
     func openSettings() { showSettings = true }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
@@ -48,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
+        updateStatusItemAppearance()
         setupScreenChangeObserver()
         zoneManager.refreshPermissionState()
 
@@ -86,8 +88,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         zoneManager.$permissionWarning
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] warning in
-                self?.updateStatusItemAppearance(warning: warning)
+            .sink { [weak self] _ in
+                self?.updateStatusItemAppearance()
+            }
+            .store(in: &cancellables)
+
+        zoneManager.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateStatusItemAppearance()
             }
             .store(in: &cancellables)
 
@@ -101,10 +110,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.popover = popover
     }
 
-    private func updateStatusItemAppearance(warning: Bool) {
+    private func updateStatusItemAppearance() {
         guard let button = statusItem?.button else { return }
-        let symbolName = warning ? "exclamationmark.triangle" : "square.split.2x2"
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "GhettoZones")
+        if zoneManager.permissionWarning {
+            button.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "GhettoZones")
+            button.image?.isTemplate = true
+            return
+        }
+        let displayID = zoneManager.displayManager.displays.first(where: \.isMain)?.id
+            ?? zoneManager.displayManager.displays.first?.id
+            ?? 0
+        let layout = zoneManager.activeLayout(for: displayID)
+        button.image = LayoutIconRenderer.image(for: layout)
+            ?? NSImage(systemSymbolName: "square.split.2x2", accessibilityDescription: "GhettoZones")
         button.image?.isTemplate = true
     }
 

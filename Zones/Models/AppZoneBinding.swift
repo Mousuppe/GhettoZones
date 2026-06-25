@@ -1,7 +1,8 @@
 import CoreGraphics
+import Defaults
 import Foundation
 
-struct AppZoneBinding: Codable, Identifiable, Equatable {
+struct AppZoneBinding: Codable, Identifiable, Equatable, Defaults.Serializable {
     var id: String { bundleIdentifier }
     var bundleIdentifier: String
     var zoneID: UUID

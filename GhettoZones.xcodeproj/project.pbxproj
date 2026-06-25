@@ -22,6 +22,7 @@
 		AA000001000000000000000D /* ZoneCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001000000000000000D /* ZoneCanvasView.swift */; };
 		AA000001000000000000000E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001000000000000000E /* SettingsView.swift */; };
 		AA000001000000000000000F /* ZoneOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001000000000000000F /* ZoneOverlayView.swift */; };
+		AA0000010000000000000013 /* LayoutIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000013 /* LayoutIconView.swift */; };
 		AA0000010000000000000010 /* default-layouts.json in Resources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000010 /* default-layouts.json */; };
 		AA0000010000000000000011 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000010000000000000001 /* KeyboardShortcuts */; };
 		AA0000010000000000000012 /* Defaults in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000010000000000000002 /* Defaults */; };
@@ -43,6 +44,7 @@
 		BB000001000000000000000D /* ZoneCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoneCanvasView.swift; sourceTree = "<group>"; };
 		BB000001000000000000000E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		BB000001000000000000000F /* ZoneOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoneOverlayView.swift; sourceTree = "<group>"; };
+		BB0000010000000000000013 /* LayoutIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutIconView.swift; sourceTree = "<group>"; };
 		BB0000010000000000000010 /* default-layouts.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "default-layouts.json"; sourceTree = "<group>"; };
 		BB0000010000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		BB0000010000000000000012 /* GhettoZones.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GhettoZones.entitlements; sourceTree = "<group>"; };
@@ -123,6 +125,7 @@
 				BB000001000000000000000D /* ZoneCanvasView.swift */,
 				BB000001000000000000000E /* SettingsView.swift */,
 				BB000001000000000000000F /* ZoneOverlayView.swift */,
+				BB0000010000000000000013 /* LayoutIconView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -222,6 +225,7 @@
 				AA000001000000000000000D /* ZoneCanvasView.swift in Sources */,
 				AA000001000000000000000E /* SettingsView.swift in Sources */,
 				AA000001000000000000000F /* ZoneOverlayView.swift in Sources */,
+				AA0000010000000000000013 /* LayoutIconView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
