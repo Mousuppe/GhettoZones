@@ -11,7 +11,7 @@ final class WindowMonitor {
     private var draggedWindow: AXUIElement?
     private var draggedBundleID: String?
     private var isMouseDragging = false
-    private var isControlDragActive = false
+    private var isCommandDragActive = false
     private weak var zoneManager: ZoneManager?
     private var overlayWindows: [CGDirectDisplayID: ZoneOverlayWindow] = [:]
     private var previewDisplayID: CGDirectDisplayID?
@@ -46,18 +46,18 @@ final class WindowMonitor {
             NSEvent.removeMonitor(monitor)
             localMouseMonitor = nil
         }
-        endControlDragSession(snap: false)
+        endCommandDragSession(snap: false)
         hideAllPreviews()
         overlayWindows.values.forEach { $0.orderOut(nil) }
         overlayWindows.removeAll()
         draggedWindow = nil
         isMouseDragging = false
-        isControlDragActive = false
+        isCommandDragActive = false
     }
 
     func refreshOverlays() {
         setupOverlayWindows()
-        if isControlDragActive {
+        if isCommandDragActive {
             updateZonePreview(at: NSEvent.mouseLocation)
         }
     }
@@ -71,26 +71,26 @@ final class WindowMonitor {
         switch event.type {
         case .leftMouseDragged:
             isMouseDragging = true
-            if isControlPressed(for: event) {
-                beginControlDragIfNeeded()
-                continueControlDrag(at: NSEvent.mouseLocation)
-            } else if isControlDragActive {
-                cancelControlDragPreview()
+            if isCommandPressed(for: event) {
+                beginCommandDragIfNeeded()
+                continueCommandDrag(at: NSEvent.mouseLocation)
+            } else if isCommandDragActive {
+                cancelCommandDragPreview()
             }
         case .leftMouseUp:
-            if isControlDragActive && isControlPressed(for: event) {
-                endControlDragSession(snap: true, at: NSEvent.mouseLocation)
+            if isCommandDragActive && isCommandPressed(for: event) {
+                endCommandDragSession(snap: true, at: NSEvent.mouseLocation)
             } else {
-                endControlDragSession(snap: false)
+                endCommandDragSession(snap: false)
             }
             isMouseDragging = false
         case .flagsChanged:
             if isMouseDragging {
-                if isControlPressed(for: event) {
-                    beginControlDragIfNeeded()
-                    continueControlDrag(at: NSEvent.mouseLocation)
-                } else if isControlDragActive {
-                    cancelControlDragPreview()
+                if isCommandPressed(for: event) {
+                    beginCommandDragIfNeeded()
+                    continueCommandDrag(at: NSEvent.mouseLocation)
+                } else if isCommandDragActive {
+                    cancelCommandDragPreview()
                 }
             }
         default:
@@ -98,42 +98,42 @@ final class WindowMonitor {
         }
     }
 
-    private func isControlPressed(for event: NSEvent) -> Bool {
-        event.modifierFlags.contains(.control)
+    private func isCommandPressed(for event: NSEvent) -> Bool {
+        event.modifierFlags.contains(.command)
     }
 
     @MainActor
-    private func beginControlDragIfNeeded() {
-        guard !isControlDragActive else { return }
+    private func beginCommandDragIfNeeded() {
+        guard !isCommandDragActive else { return }
         guard let window = focusedWindowElement(), !isUserTyping(in: window) else { return }
         draggedWindow = window
         draggedBundleID = bundleIdentifier(for: window)
-        isControlDragActive = true
+        isCommandDragActive = true
     }
 
     @MainActor
-    private func continueControlDrag(at point: NSPoint) {
-        guard isControlDragActive else { return }
+    private func continueCommandDrag(at point: NSPoint) {
+        guard isCommandDragActive else { return }
         updateZonePreview(at: point)
     }
 
     @MainActor
-    private func cancelControlDragPreview() {
+    private func cancelCommandDragPreview() {
         zoneManager?.highlightedZoneID = nil
         previewDisplayID = nil
         hideAllPreviews()
-        isControlDragActive = false
+        isCommandDragActive = false
         draggedWindow = nil
         draggedBundleID = nil
     }
 
     @MainActor
-    private func endControlDragSession(snap: Bool, at point: NSPoint? = nil) {
+    private func endCommandDragSession(snap: Bool, at point: NSPoint? = nil) {
         defer {
             zoneManager?.highlightedZoneID = nil
             previewDisplayID = nil
             hideAllPreviews()
-            isControlDragActive = false
+            isCommandDragActive = false
             draggedWindow = nil
             draggedBundleID = nil
         }

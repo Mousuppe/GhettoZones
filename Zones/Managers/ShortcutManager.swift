@@ -4,21 +4,21 @@ import KeyboardShortcuts
 import SwiftUI
 
 extension KeyboardShortcuts.Name {
-    static let snapLeft = Self("snapLeft", default: .init(.leftArrow, modifiers: [.control]))
-    static let snapRight = Self("snapRight", default: .init(.rightArrow, modifiers: [.control]))
-    static let snapUp = Self("snapUp", default: .init(.upArrow, modifiers: [.control]))
-    static let snapDown = Self("snapDown", default: .init(.downArrow, modifiers: [.control]))
-    static let snapZone1 = Self("snapZone1", default: .init(.one, modifiers: [.control]))
-    static let snapZone2 = Self("snapZone2", default: .init(.two, modifiers: [.control]))
-    static let snapZone3 = Self("snapZone3", default: .init(.three, modifiers: [.control]))
-    static let snapZone4 = Self("snapZone4", default: .init(.four, modifiers: [.control]))
-    static let snapZone5 = Self("snapZone5", default: .init(.five, modifiers: [.control]))
-    static let snapZone6 = Self("snapZone6", default: .init(.six, modifiers: [.control]))
-    static let snapZone7 = Self("snapZone7", default: .init(.seven, modifiers: [.control]))
-    static let snapZone8 = Self("snapZone8", default: .init(.eight, modifiers: [.control]))
-    static let snapZone9 = Self("snapZone9", default: .init(.nine, modifiers: [.control]))
-    static let moveToNextMonitor = Self("moveToNextMonitor", default: .init(.rightArrow, modifiers: [.control, .shift]))
-    static let moveToPreviousMonitor = Self("moveToPreviousMonitor", default: .init(.leftArrow, modifiers: [.control, .shift]))
+    static let snapLeft = Self("snapLeft", default: .init(.leftArrow, modifiers: [.command]))
+    static let snapRight = Self("snapRight", default: .init(.rightArrow, modifiers: [.command]))
+    static let snapUp = Self("snapUp", default: .init(.upArrow, modifiers: [.command]))
+    static let snapDown = Self("snapDown", default: .init(.downArrow, modifiers: [.command]))
+    static let snapZone1 = Self("snapZone1", default: .init(.one, modifiers: [.command]))
+    static let snapZone2 = Self("snapZone2", default: .init(.two, modifiers: [.command]))
+    static let snapZone3 = Self("snapZone3", default: .init(.three, modifiers: [.command]))
+    static let snapZone4 = Self("snapZone4", default: .init(.four, modifiers: [.command]))
+    static let snapZone5 = Self("snapZone5", default: .init(.five, modifiers: [.command]))
+    static let snapZone6 = Self("snapZone6", default: .init(.six, modifiers: [.command]))
+    static let snapZone7 = Self("snapZone7", default: .init(.seven, modifiers: [.command]))
+    static let snapZone8 = Self("snapZone8", default: .init(.eight, modifiers: [.command]))
+    static let snapZone9 = Self("snapZone9", default: .init(.nine, modifiers: [.command]))
+    static let moveToNextMonitor = Self("moveToNextMonitor", default: .init(.rightArrow, modifiers: [.command, .shift]))
+    static let moveToPreviousMonitor = Self("moveToPreviousMonitor", default: .init(.leftArrow, modifiers: [.command, .shift]))
 }
 
 @MainActor
