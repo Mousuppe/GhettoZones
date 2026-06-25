@@ -25,6 +25,8 @@
 		AA0000010000000000000013 /* LayoutIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000013 /* LayoutIconView.swift */; };
 		AA0000010000000000000014 /* CodeSigningHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000014 /* CodeSigningHelper.swift */; };
 		AA0000010000000000000016 /* AccessibilityChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000016 /* AccessibilityChecker.swift */; };
+		AA0000010000000000000018 /* CGEventTapMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000018 /* CGEventTapMonitor.swift */; };
+		AA0000010000000000000019 /* WindowAccessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000019 /* WindowAccessibility.swift */; };
 		AA0000010000000000000015 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000015 /* Assets.xcassets */; };
 		AA0000010000000000000017 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000017 /* AppIcon.icns */; };
 		AA0000010000000000000010 /* default-layouts.json in Resources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000010 /* default-layouts.json */; };
@@ -51,6 +53,8 @@
 		BB0000010000000000000013 /* LayoutIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutIconView.swift; sourceTree = "<group>"; };
 		BB0000010000000000000014 /* CodeSigningHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeSigningHelper.swift; sourceTree = "<group>"; };
 		BB0000010000000000000016 /* AccessibilityChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityChecker.swift; sourceTree = "<group>"; };
+		BB0000010000000000000018 /* CGEventTapMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CGEventTapMonitor.swift; sourceTree = "<group>"; };
+		BB0000010000000000000019 /* WindowAccessibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowAccessibility.swift; sourceTree = "<group>"; };
 		BB0000010000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BB0000010000000000000017 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		BB0000010000000000000010 /* default-layouts.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "default-layouts.json"; sourceTree = "<group>"; };
@@ -154,6 +158,8 @@
 			children = (
 				BB0000010000000000000014 /* CodeSigningHelper.swift */,
 				BB0000010000000000000016 /* AccessibilityChecker.swift */,
+				BB0000010000000000000018 /* CGEventTapMonitor.swift */,
+				BB0000010000000000000019 /* WindowAccessibility.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -250,6 +256,8 @@
 				AA0000010000000000000013 /* LayoutIconView.swift in Sources */,
 				AA0000010000000000000014 /* CodeSigningHelper.swift in Sources */,
 				AA0000010000000000000016 /* AccessibilityChecker.swift in Sources */,
+				AA0000010000000000000018 /* CGEventTapMonitor.swift in Sources */,
+				AA0000010000000000000019 /* WindowAccessibility.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

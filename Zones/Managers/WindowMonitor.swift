@@ -6,12 +6,12 @@ import Combine
 final class WindowMonitor {
     static let shared = WindowMonitor()
 
-    private var globalMouseMonitor: Any?
-    private var localMouseMonitor: Any?
+    private var eventTapMonitor: CGEventTapMonitor?
     private var draggedWindow: AXUIElement?
     private var draggedBundleID: String?
-    private var isMouseDragging = false
+    private var initialWindowFrame: CGRect?
     private var isCommandDragActive = false
+    private var windowLookupAttempts = 0
     private weak var zoneManager: ZoneManager?
     private var overlayWindows: [CGDirectDisplayID: ZoneOverlayWindow] = [:]
     private var previewDisplayID: CGDirectDisplayID?
@@ -22,37 +22,17 @@ final class WindowMonitor {
         self.zoneManager = zoneManager
         stop()
         setupOverlayWindows()
-
-        let events: NSEvent.EventTypeMask = [.leftMouseDragged, .leftMouseUp, .flagsChanged]
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: events) { [weak self] event in
-            Task { @MainActor in
-                self?.handleMouseEvent(event)
-            }
-        }
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
-            Task { @MainActor in
-                self?.handleMouseEvent(event)
-            }
-            return event
-        }
+        startEventTap()
     }
 
     func stop() {
-        if let monitor = globalMouseMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalMouseMonitor = nil
-        }
-        if let monitor = localMouseMonitor {
-            NSEvent.removeMonitor(monitor)
-            localMouseMonitor = nil
-        }
+        eventTapMonitor?.stop()
+        eventTapMonitor = nil
         endCommandDragSession(snap: false)
         hideAllPreviews()
         overlayWindows.values.forEach { $0.orderOut(nil) }
         overlayWindows.removeAll()
-        draggedWindow = nil
-        isMouseDragging = false
-        isCommandDragActive = false
+        resetDragState()
     }
 
     func refreshOverlays() {
@@ -62,52 +42,99 @@ final class WindowMonitor {
         }
     }
 
-    // MARK: - Mouse handling
+    // MARK: - Event tap
+
+    private func startEventTap() {
+        let monitor = CGEventTapMonitor(eventTypes: [
+            .leftMouseDown,
+            .leftMouseDragged,
+            .leftMouseUp,
+            .flagsChanged
+        ]) { [weak self] event, type in
+            Task { @MainActor in
+                self?.handleCGEvent(event, type: type)
+            }
+        }
+
+        if monitor.start() {
+            eventTapMonitor = monitor
+        }
+    }
 
     @MainActor
-    private func handleMouseEvent(_ event: NSEvent) {
+    private func handleCGEvent(_ event: CGEvent, type: CGEventType) {
         guard let zoneManager, zoneManager.snappingEnabled, zoneManager.isAccessibilityGranted else { return }
 
-        switch event.type {
+        let point = event.appKitScreenPoint
+
+        switch type {
+        case .leftMouseDown:
+            windowLookupAttempts = 0
+            if let window = WindowAccessibility.windowElementUnderCursor(at: point),
+               !isUserTyping(in: window) {
+                draggedWindow = window
+                draggedBundleID = bundleIdentifier(for: window)
+                initialWindowFrame = WindowAccessibility.windowFrame(window)
+            } else {
+                draggedWindow = nil
+                draggedBundleID = nil
+                initialWindowFrame = nil
+            }
+
         case .leftMouseDragged:
-            isMouseDragging = true
-            if isCommandPressed(for: event) {
+            resolveDraggedWindowIfNeeded(at: point)
+            guard draggedWindow != nil else { return }
+            if event.isCommandPressed {
                 beginCommandDragIfNeeded()
-                continueCommandDrag(at: NSEvent.mouseLocation)
+                continueCommandDrag(at: point)
             } else if isCommandDragActive {
                 cancelCommandDragPreview()
             }
+
         case .leftMouseUp:
-            if isCommandDragActive && isCommandPressed(for: event) {
-                endCommandDragSession(snap: true, at: NSEvent.mouseLocation)
+            if isCommandDragActive {
+                endCommandDragSession(snap: true, at: point)
             } else {
                 endCommandDragSession(snap: false)
             }
-            isMouseDragging = false
+            resetDragState()
+
         case .flagsChanged:
-            if isMouseDragging {
-                if isCommandPressed(for: event) {
+            if draggedWindow != nil {
+                if event.isCommandPressed {
                     beginCommandDragIfNeeded()
-                    continueCommandDrag(at: NSEvent.mouseLocation)
+                    continueCommandDrag(at: point)
                 } else if isCommandDragActive {
                     cancelCommandDragPreview()
                 }
             }
+
         default:
             break
         }
     }
 
-    private func isCommandPressed(for event: NSEvent) -> Bool {
-        event.modifierFlags.contains(.command)
+    private func resolveDraggedWindowIfNeeded(at point: NSPoint) {
+        guard draggedWindow == nil, windowLookupAttempts < 20 else { return }
+        windowLookupAttempts += 1
+        if let window = WindowAccessibility.windowElementUnderCursor(at: point),
+           !isUserTyping(in: window) {
+            draggedWindow = window
+            draggedBundleID = bundleIdentifier(for: window)
+            initialWindowFrame = WindowAccessibility.windowFrame(window)
+        }
+    }
+
+    private func resetDragState() {
+        draggedWindow = nil
+        draggedBundleID = nil
+        initialWindowFrame = nil
+        windowLookupAttempts = 0
     }
 
     @MainActor
     private func beginCommandDragIfNeeded() {
-        guard !isCommandDragActive else { return }
-        guard let window = focusedWindowElement(), !isUserTyping(in: window) else { return }
-        draggedWindow = window
-        draggedBundleID = bundleIdentifier(for: window)
+        guard !isCommandDragActive, draggedWindow != nil else { return }
         isCommandDragActive = true
     }
 
@@ -123,8 +150,6 @@ final class WindowMonitor {
         previewDisplayID = nil
         hideAllPreviews()
         isCommandDragActive = false
-        draggedWindow = nil
-        draggedBundleID = nil
     }
 
     @MainActor
@@ -134,8 +159,6 @@ final class WindowMonitor {
             previewDisplayID = nil
             hideAllPreviews()
             isCommandDragActive = false
-            draggedWindow = nil
-            draggedBundleID = nil
         }
 
         guard snap,
@@ -222,7 +245,7 @@ final class WindowMonitor {
     @MainActor
     func moveFocusedWindowToAdjacentMonitor(direction: ZoneDirection, zoneManager: ZoneManager) {
         guard let window = focusedWindowElement(), !isUserTyping(in: window) else { return }
-        guard var currentFrame = windowFrame(window) else { return }
+        guard var currentFrame = WindowAccessibility.windowFrame(window) else { return }
         let center = CGPoint(x: currentFrame.midX, y: currentFrame.midY)
         guard let currentDisplay = zoneManager.displayManager.display(for: NSPoint(x: center.x, y: center.y)) else { return }
 
@@ -287,7 +310,7 @@ final class WindowMonitor {
 
     func currentFocusedZone(on displayID: CGDirectDisplayID, zoneManager: ZoneManager) -> Zone? {
         guard let window = focusedWindowElement(),
-              let frame = windowFrame(window),
+              let frame = WindowAccessibility.windowFrame(window),
               let display = zoneManager.displayManager.display(for: NSPoint(x: frame.midX, y: frame.midY)) else { return nil }
         return zoneManager.zone(at: NSPoint(x: frame.midX, y: frame.midY), on: display.id)
     }
@@ -321,19 +344,6 @@ final class WindowMonitor {
         guard AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXRoleAttribute as CFString, &roleRef) == .success,
               let role = roleRef as? String else { return false }
         return role == kAXTextFieldRole || role == kAXTextAreaRole
-    }
-
-    private func windowFrame(_ window: AXUIElement) -> CGRect? {
-        var positionRef: CFTypeRef?
-        var sizeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionRef) == .success,
-              AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success,
-              let positionRef, let sizeRef else { return nil }
-        var position = CGPoint.zero
-        var size = CGSize.zero
-        AXValueGetValue(positionRef as! AXValue, .cgPoint, &position)
-        AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
-        return CGRect(origin: position, size: size)
     }
 
     private func setWindowFrame(_ window: AXUIElement, frame: CGRect) {
