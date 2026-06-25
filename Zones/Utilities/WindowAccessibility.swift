@@ -167,15 +167,79 @@ enum WindowAccessibility {
     }
 
     static func windowFrame(_ window: AXUIElement) -> CGRect? {
-        var positionRef: CFTypeRef?
-        var sizeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionRef) == .success,
-              AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success,
-              let positionRef, let sizeRef else { return nil }
-        var position = CGPoint.zero
-        var size = CGSize.zero
-        AXValueGetValue(positionRef as! AXValue, .cgPoint, &position)
-        AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
+        guard let position = windowPosition(window),
+              let size = windowSize(window) else { return nil }
         return CGRect(origin: position, size: size)
+    }
+
+    /// Resize and move a window to fill a zone frame (yabai / Rectangle triple-set pattern).
+    static func setWindowFrame(_ window: AXUIElement, frame: CGRect) {
+        let target = frame.integral
+
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else { return }
+        if let app = NSRunningApplication(processIdentifier: pid) {
+            app.activate(options: .activateIgnoringOtherApps)
+        }
+
+        let appElement = AXUIElementCreateApplication(pid)
+        let hadEnhancedUI = disableEnhancedUIIfNeeded(appElement)
+
+        setWindowSize(window, size: target.size)
+        setWindowPosition(window, position: target.origin)
+        setWindowSize(window, size: target.size)
+
+        if hadEnhancedUI {
+            AXUIElementSetAttributeValue(
+                appElement,
+                "AXEnhancedUserInterface" as CFString,
+                kCFBooleanTrue
+            )
+        }
+    }
+
+    private static func windowPosition(_ window: AXUIElement) -> CGPoint? {
+        var positionRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionRef) == .success,
+              let positionRef else { return nil }
+        var position = CGPoint.zero
+        guard AXValueGetValue(positionRef as! AXValue, .cgPoint, &position) else { return nil }
+        return position
+    }
+
+    private static func windowSize(_ window: AXUIElement) -> CGSize? {
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let sizeRef else { return nil }
+        var size = CGSize.zero
+        guard AXValueGetValue(sizeRef as! AXValue, .cgSize, &size) else { return nil }
+        return size
+    }
+
+    private static func setWindowPosition(_ window: AXUIElement, position: CGPoint) {
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(window, kAXPositionAttribute as CFString, &settable) == .success,
+              settable.boolValue else { return }
+        var point = position
+        guard let value = AXValueCreate(.cgPoint, &point) else { return }
+        AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value)
+    }
+
+    private static func setWindowSize(_ window: AXUIElement, size: CGSize) {
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(window, kAXSizeAttribute as CFString, &settable) == .success,
+              settable.boolValue else { return }
+        var dimensions = size
+        guard let value = AXValueCreate(.cgSize, &dimensions) else { return }
+        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+    }
+
+    private static func disableEnhancedUIIfNeeded(_ appElement: AXUIElement) -> Bool {
+        var enhancedUIRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, &enhancedUIRef) == .success,
+              let enabled = enhancedUIRef as? Bool,
+              enabled else { return false }
+        AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
+        return true
     }
 }

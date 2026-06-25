@@ -146,7 +146,7 @@ final class WindowMonitor {
                 draggedBundleID = draggedWindow.flatMap { bundleIdentifier(for: $0) }
             }
             if isCommandDragActive {
-                endCommandDragSession(snap: zoneManager.isAccessibilityGranted, at: point)
+                endCommandDragSession(snap: true, at: point)
             } else {
                 endCommandDragSession(snap: false)
             }
@@ -247,13 +247,31 @@ final class WindowMonitor {
 
         guard snap,
               let zoneManager,
-              let window = draggedWindow,
-              let point,
-              let display = zoneManager.displayManager.display(for: point),
-              let zone = zoneManager.zone(at: point, on: display.id),
-              let layout = zoneManager.activeLayout(for: display.id) else { return }
+              let window = draggedWindow else { return }
 
-        snapWindow(window, to: zone, displayID: display.id, zoneManager: zoneManager, layout: layout)
+        let displayID = previewDisplayID
+            ?? point.flatMap { zoneManager.displayManager.display(for: $0)?.id }
+        guard let displayID,
+              let layout = zoneManager.activeLayout(for: displayID),
+              let zone = zoneForSnap(at: point, displayID: displayID, layout: layout, zoneManager: zoneManager) else { return }
+
+        snapWindow(window, to: zone, displayID: displayID, zoneManager: zoneManager, layout: layout)
+    }
+
+    private func zoneForSnap(
+        at point: NSPoint?,
+        displayID: CGDirectDisplayID,
+        layout: ZoneLayout,
+        zoneManager: ZoneManager
+    ) -> Zone? {
+        if let highlightedID = zoneManager.highlightedZoneID,
+           let zone = layout.zones.first(where: { $0.id == highlightedID }) {
+            return zone
+        }
+        if let point {
+            return zoneManager.zone(at: point, on: displayID)
+        }
+        return nil
     }
 
     @MainActor
@@ -315,7 +333,7 @@ final class WindowMonitor {
         remember: Bool = true
     ) {
         guard let frame = zoneManager.displayManager.absoluteFrame(for: zone, on: displayID) else { return }
-        setWindowFrame(window, frame: frame)
+        WindowAccessibility.setWindowFrame(window, frame: frame)
         if remember, let bundleID = draggedBundleID ?? bundleIdentifier(for: window) {
             zoneManager.rememberPosition(
                 bundleIdentifier: bundleID,
@@ -355,7 +373,7 @@ final class WindowMonitor {
             width: newWidth,
             height: newHeight
         )
-        setWindowFrame(window, frame: newFrame)
+        WindowAccessibility.setWindowFrame(window, frame: newFrame)
     }
 
     // MARK: - Overlay
@@ -430,14 +448,4 @@ final class WindowMonitor {
         return role == kAXTextFieldRole || role == kAXTextAreaRole
     }
 
-    private func setWindowFrame(_ window: AXUIElement, frame: CGRect) {
-        var position = frame.origin
-        var size = frame.size
-        if let positionValue = AXValueCreate(.cgPoint, &position) {
-            AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, positionValue)
-        }
-        if let sizeValue = AXValueCreate(.cgSize, &size) {
-            AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
-        }
-    }
 }

@@ -66,7 +66,7 @@ final class ShortcutManager {
     private func snapAdjacent(_ direction: ZoneDirection) {
         guard let zoneManager, zoneManager.snappingEnabled, zoneManager.isAccessibilityGranted else { return }
         guard let window = WindowMonitor.shared.focusedWindowElement(),
-              let frame = windowFrame(window) else { return }
+              let frame = WindowAccessibility.windowFrame(window) else { return }
         let center = NSPoint(x: frame.midX, y: frame.midY)
         guard let display = zoneManager.displayManager.display(for: center) else { return }
         let current = WindowMonitor.shared.currentFocusedZone(on: display.id, zoneManager: zoneManager)
@@ -80,7 +80,7 @@ final class ShortcutManager {
     private func snapToIndex(_ index: Int) {
         guard let zoneManager, zoneManager.snappingEnabled, zoneManager.isAccessibilityGranted else { return }
         guard let window = WindowMonitor.shared.focusedWindowElement(),
-              let frame = windowFrame(window) else { return }
+              let frame = WindowAccessibility.windowFrame(window) else { return }
         let center = NSPoint(x: frame.midX, y: frame.midY)
         guard let display = zoneManager.displayManager.display(for: center),
               let zone = zoneManager.zone(at: index, on: display.id) else { return }
@@ -93,16 +93,4 @@ final class ShortcutManager {
         WindowMonitor.shared.moveFocusedWindowToAdjacentMonitor(direction: direction, zoneManager: zoneManager)
     }
 
-    private func windowFrame(_ window: AXUIElement) -> CGRect? {
-        var positionRef: CFTypeRef?
-        var sizeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionRef) == .success,
-              AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success,
-              let positionRef, let sizeRef else { return nil }
-        var position = CGPoint.zero
-        var size = CGSize.zero
-        AXValueGetValue(positionRef as! AXValue, .cgPoint, &position)
-        AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
-        return CGRect(origin: position, size: size)
-    }
 }
