@@ -155,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 backing: .buffered,
                 defer: false
             )
-            window.title = NSLocalizedString("Zone Editor", comment: "Zone editor window title")
+            window.title = NSLocalizedString("GhettoZones Zone Editor", comment: "Zone editor window title")
             window.center()
             window.isReleasedWhenClosed = false
             window.contentViewController = NSHostingController(
@@ -175,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 backing: .buffered,
                 defer: false
             )
-            window.title = NSLocalizedString("Settings", comment: "Settings window title")
+            window.title = NSLocalizedString("GhettoZones Settings", comment: "Settings window title")
             window.center()
             window.isReleasedWhenClosed = false
             window.contentViewController = NSHostingController(
@@ -208,10 +208,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !AXIsProcessTrusted() else { return }
         let alert = NSAlert()
         alert.messageText = NSLocalizedString("Accessibility Permission Required", comment: "Accessibility alert title")
-        alert.informativeText = NSLocalizedString(
-            "GhettoZones needs Accessibility access to snap and resize windows. Grant access in System Settings, then return here.",
-            comment: "Accessibility alert message"
-        )
+        alert.informativeText = CodeSigningHelper.isAdHocSigned
+            ? NSLocalizedString(
+                "GhettoZones needs Accessibility access to snap and resize windows.\n\nThis build is ad-hoc signed. If GhettoZones is already in the list, remove it with the − button first, then enable it again for this install.",
+                comment: "Accessibility alert message for ad-hoc builds"
+            )
+            : NSLocalizedString(
+                "GhettoZones needs Accessibility access to snap and resize windows. Grant access in System Settings, then return here.",
+                comment: "Accessibility alert message"
+            )
         alert.addButton(withTitle: NSLocalizedString("Open System Settings", comment: "Accessibility alert button"))
         alert.addButton(withTitle: NSLocalizedString("Later", comment: "Dismiss accessibility alert"))
         let response = alert.runModal()

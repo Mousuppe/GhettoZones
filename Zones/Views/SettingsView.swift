@@ -54,8 +54,8 @@ struct SettingsView: View {
                     Text(NSLocalizedString("Accessibility", comment: "Accessibility permission"))
                     Spacer()
                     if !zoneManager.isAccessibilityGranted {
-                        Button(NSLocalizedString("Grant Access", comment: "Open accessibility settings")) {
-                            zoneManager.requestAccessibility()
+                        Button(NSLocalizedString("Re-grant Access", comment: "Repair accessibility access")) {
+                            zoneManager.repairAccessibilityAccess()
                         }
                         Button(NSLocalizedString("Open Settings", comment: "Open system settings")) {
                             zoneManager.openAccessibilitySettings()
@@ -64,16 +64,18 @@ struct SettingsView: View {
                 }
 
                 if zoneManager.isAccessibilityGranted {
-                    Text(NSLocalizedString("Accessibility access is enabled.", comment: "Accessibility granted message"))
+                    Text(zoneManager.accessibilityStatusDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text(NSLocalizedString("GhettoZones needs Accessibility access to move and resize windows.", comment: "Accessibility explanation"))
+                    Text(zoneManager.accessibilityStatusDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(NSLocalizedString("If you already enabled GhettoZones in System Settings, toggle it off and on, then switch back here — or quit and reopen the app.", comment: "Accessibility troubleshooting"))
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                    if CodeSigningHelper.isAdHocSigned {
+                        Text(NSLocalizedString("Tip: Sign in to Xcode with an Apple ID and enable automatic signing for a stable development certificate.", comment: "Code signing tip"))
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     Text(Bundle.main.bundlePath)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)

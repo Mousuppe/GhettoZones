@@ -23,6 +23,8 @@
 		AA000001000000000000000E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001000000000000000E /* SettingsView.swift */; };
 		AA000001000000000000000F /* ZoneOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001000000000000000F /* ZoneOverlayView.swift */; };
 		AA0000010000000000000013 /* LayoutIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000013 /* LayoutIconView.swift */; };
+		AA0000010000000000000014 /* CodeSigningHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000014 /* CodeSigningHelper.swift */; };
+		AA0000010000000000000015 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000015 /* Assets.xcassets */; };
 		AA0000010000000000000010 /* default-layouts.json in Resources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000010 /* default-layouts.json */; };
 		AA0000010000000000000011 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000010000000000000001 /* KeyboardShortcuts */; };
 		AA0000010000000000000012 /* Defaults in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000010000000000000002 /* Defaults */; };
@@ -45,6 +47,8 @@
 		BB000001000000000000000E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		BB000001000000000000000F /* ZoneOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoneOverlayView.swift; sourceTree = "<group>"; };
 		BB0000010000000000000013 /* LayoutIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutIconView.swift; sourceTree = "<group>"; };
+		BB0000010000000000000014 /* CodeSigningHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeSigningHelper.swift; sourceTree = "<group>"; };
+		BB0000010000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BB0000010000000000000010 /* default-layouts.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "default-layouts.json"; sourceTree = "<group>"; };
 		BB0000010000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		BB0000010000000000000012 /* GhettoZones.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GhettoZones.entitlements; sourceTree = "<group>"; };
@@ -80,6 +84,7 @@
 				FF0000010000000000000004 /* Models */,
 				FF0000010000000000000005 /* Managers */,
 				FF0000010000000000000006 /* Views */,
+				FF0000010000000000000008 /* Utilities */,
 				FF0000010000000000000007 /* Resources */,
 				BB0000010000000000000011 /* Info.plist */,
 				BB0000010000000000000012 /* GhettoZones.entitlements */,
@@ -133,9 +138,18 @@
 		FF0000010000000000000007 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				BB0000010000000000000015 /* Assets.xcassets */,
 				BB0000010000000000000010 /* default-layouts.json */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		FF0000010000000000000008 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				BB0000010000000000000014 /* CodeSigningHelper.swift */,
+			);
+			path = Utilities;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -199,6 +213,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0000010000000000000015 /* Assets.xcassets in Resources */,
 				AA0000010000000000000010 /* default-layouts.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -226,6 +241,7 @@
 				AA000001000000000000000E /* SettingsView.swift in Sources */,
 				AA000001000000000000000F /* ZoneOverlayView.swift in Sources */,
 				AA0000010000000000000013 /* LayoutIconView.swift in Sources */,
+				AA0000010000000000000014 /* CodeSigningHelper.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -271,7 +287,7 @@
 		770000070000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Zones/GhettoZones.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -294,7 +310,7 @@
 		770000070000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Zones/GhettoZones.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;

@@ -50,17 +50,17 @@ struct MenuBarPopoverView: View {
 
             Divider()
 
-            Button(NSLocalizedString("Edit Zones…", comment: "Open zone editor")) {
+            Button(NSLocalizedString("Edit GhettoZones Layouts…", comment: "Open zone editor")) {
                 appState.openZoneEditor()
             }
 
-            Button(NSLocalizedString("Settings…", comment: "Open settings")) {
+            Button(NSLocalizedString("GhettoZones Settings…", comment: "Open settings")) {
                 appState.openSettings()
             }
 
             Divider()
 
-            Button(NSLocalizedString("Quit Zones", comment: "Quit app")) {
+            Button(NSLocalizedString("Quit GhettoZones", comment: "Quit app")) {
                 NSApplication.shared.terminate(nil)
             }
         }

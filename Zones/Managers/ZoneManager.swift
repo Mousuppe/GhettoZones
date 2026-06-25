@@ -83,6 +83,32 @@ final class ZoneManager: ObservableObject {
         refreshPermissionState()
     }
 
+    func repairAccessibilityAccess() {
+        if CodeSigningHelper.isAdHocSigned {
+            openAccessibilitySettings()
+        }
+        requestAccessibility()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.refreshPermissionState()
+        }
+    }
+
+    var accessibilityStatusDetail: String {
+        if isAccessibilityGranted {
+            return NSLocalizedString("Accessibility access is enabled.", comment: "Accessibility granted message")
+        }
+        if CodeSigningHelper.isAdHocSigned {
+            return NSLocalizedString(
+                "This GhettoZones build is ad-hoc signed. macOS links Accessibility to the app signature, so reinstalling invalidates access even if the toggle looks enabled. Remove GhettoZones from the Accessibility list with the − button, then click Re-grant Access.",
+                comment: "Ad-hoc signing accessibility explanation"
+            )
+        }
+        return NSLocalizedString(
+            "GhettoZones needs Accessibility access to move and resize windows.",
+            comment: "Accessibility explanation"
+        )
+    }
+
     func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)

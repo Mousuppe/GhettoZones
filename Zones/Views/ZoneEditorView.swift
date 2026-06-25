@@ -17,7 +17,7 @@ struct ZoneEditorView: View {
             editorDetail
         }
         .frame(minWidth: 800, minHeight: 500)
-        .navigationTitle(NSLocalizedString("Zone Editor", comment: "Zone editor window title"))
+        .navigationTitle(NSLocalizedString("GhettoZones Zone Editor", comment: "Zone editor window title"))
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(NSLocalizedString("Done", comment: "Close editor")) {
