@@ -13,6 +13,7 @@ final class WindowMonitor {
     private var draggedBundleID: String?
     private var initialWindowFrame: CGRect?
     private var isCommandDragActive = false
+    private var commandInvolvedInDrag = false
     private var isLeftMouseDown = false
     private var windowLookupAttempts = 0
     private weak var zoneManager: ZoneManager?
@@ -132,6 +133,7 @@ final class WindowMonitor {
             isLeftMouseDown = true
             resolveDraggedWindowIfNeeded(at: point)
             if event.isCommandPressed {
+                commandInvolvedInDrag = true
                 beginCommandDragIfNeeded()
                 continueCommandDrag(at: point)
             } else if isCommandDragActive {
@@ -141,24 +143,23 @@ final class WindowMonitor {
         case .leftMouseUp:
             isLeftMouseDown = false
             resolveDraggedWindowIfNeeded(at: point)
-            if draggedWindow == nil {
-                draggedWindow = WindowAccessibility.frontmostWindow()
-                draggedBundleID = draggedWindow.flatMap { bundleIdentifier(for: $0) }
+            ensureDraggedWindowForSnap(at: point)
+            if commandInvolvedInDrag {
+                snapIfPointerInZone(at: point)
             }
-            if isCommandDragActive {
-                endCommandDragSession(snap: true, at: point)
-            } else {
-                endCommandDragSession(snap: false)
-            }
+            finishCommandDragSession()
             resetDragState()
 
         case .flagsChanged:
             guard isLeftMouseDown else { return }
             resolveDraggedWindowIfNeeded(at: point)
             if event.isCommandPressed {
+                commandInvolvedInDrag = true
                 beginCommandDragIfNeeded()
                 continueCommandDrag(at: point)
-            } else if isCommandDragActive {
+            } else if isCommandDragActive || commandInvolvedInDrag {
+                ensureDraggedWindowForSnap(at: point)
+                snapIfPointerInZone(at: point)
                 cancelCommandDragPreview()
             }
 
@@ -214,6 +215,7 @@ final class WindowMonitor {
         initialWindowFrame = nil
         windowLookupAttempts = 0
         isLeftMouseDown = false
+        commandInvolvedInDrag = false
     }
 
     @MainActor
@@ -237,25 +239,50 @@ final class WindowMonitor {
     }
 
     @MainActor
-    private func endCommandDragSession(snap: Bool, at point: NSPoint? = nil) {
-        defer {
-            zoneManager?.highlightedZoneID = nil
-            previewDisplayID = nil
-            hideAllPreviews()
-            isCommandDragActive = false
-        }
+    private func finishCommandDragSession() {
+        zoneManager?.highlightedZoneID = nil
+        previewDisplayID = nil
+        hideAllPreviews()
+        isCommandDragActive = false
+    }
 
-        guard snap,
-              let zoneManager,
-              let window = draggedWindow else { return }
+    @MainActor
+    private func ensureDraggedWindowForSnap(at point: NSPoint) {
+        guard draggedWindow == nil else { return }
+        if let window = WindowAccessibility.windowElementUnderCursor(at: point),
+           !isUserTyping(in: window) {
+            draggedWindow = window
+            draggedBundleID = bundleIdentifier(for: window)
+        } else if let window = WindowAccessibility.frontmostWindow(),
+                  !isUserTyping(in: window) {
+            draggedWindow = window
+            draggedBundleID = bundleIdentifier(for: window)
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    private func snapIfPointerInZone(at point: NSPoint) -> Bool {
+        guard let zoneManager, let window = draggedWindow else { return false }
 
         let displayID = previewDisplayID
-            ?? point.flatMap { zoneManager.displayManager.display(for: $0)?.id }
+            ?? zoneManager.displayManager.display(for: point)?.id
         guard let displayID,
               let layout = zoneManager.activeLayout(for: displayID),
-              let zone = zoneForSnap(at: point, displayID: displayID, layout: layout, zoneManager: zoneManager) else { return }
+              let zone = zoneForSnap(at: point, displayID: displayID, layout: layout, zoneManager: zoneManager) else {
+            return false
+        }
 
         snapWindow(window, to: zone, displayID: displayID, zoneManager: zoneManager, layout: layout)
+        return true
+    }
+
+    @MainActor
+    private func endCommandDragSession(snap: Bool, at point: NSPoint? = nil) {
+        if snap, let point {
+            snapIfPointerInZone(at: point)
+        }
+        finishCommandDragSession()
     }
 
     private func zoneForSnap(
