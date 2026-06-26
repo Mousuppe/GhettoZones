@@ -208,13 +208,13 @@ enum WindowAccessibility {
             return nil
         }
 
-        for window in windows where isStandardWindow(window) {
+        for window in windows where isResizableWindow(window) {
             if let frame = windowFrame(window), framesMatch(frame, expectedBounds) {
                 return window
             }
         }
 
-        return windows.first(where: isStandardWindow(_:))
+        return windows.first(where: isResizableWindow(_:))
     }
 
     private static func framesMatch(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat = 4) -> Bool {
@@ -224,13 +224,29 @@ enum WindowAccessibility {
             && abs(lhs.height - rhs.height) <= tolerance
     }
 
-    private static func isStandardWindow(_ window: AXUIElement) -> Bool {
+    private static func isResizableWindow(_ window: AXUIElement) -> Bool {
+        var roleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, kAXRoleAttribute as CFString, &roleRef) == .success,
+              let role = roleRef as? String,
+              role == kAXWindowRole else {
+            return false
+        }
+
         var subroleRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subroleRef) == .success,
               let subrole = subroleRef as? String else {
             return true
         }
-        return subrole == kAXStandardWindowSubrole
+
+        let excludedSubroles: Set<String> = [
+            kAXFloatingWindowSubrole as String,
+            kAXSystemDialogSubrole as String,
+        ]
+        return !excludedSubroles.contains(subrole)
+    }
+
+    private static func isStandardWindow(_ window: AXUIElement) -> Bool {
+        isResizableWindow(window)
     }
 
     static func windowFrame(_ window: AXUIElement) -> CGRect? {
@@ -240,11 +256,12 @@ enum WindowAccessibility {
     }
 
     /// Resize and move a window to fill a zone frame (yabai / Rectangle triple-set pattern).
-    static func setWindowFrame(_ window: AXUIElement, frame: CGRect) {
+    @discardableResult
+    static func setWindowFrame(_ window: AXUIElement, frame: CGRect) -> Bool {
         let target = frame.integral
 
         var pid: pid_t = 0
-        guard AXUIElementGetPid(window, &pid) == .success else { return }
+        guard AXUIElementGetPid(window, &pid) == .success else { return false }
         if let app = NSRunningApplication(processIdentifier: pid) {
             app.activate(options: .activateIgnoringOtherApps)
         }
@@ -263,6 +280,9 @@ enum WindowAccessibility {
                 kCFBooleanTrue
             )
         }
+
+        guard let actual = windowFrame(window) else { return false }
+        return framesMatch(actual, target, tolerance: 8)
     }
 
     private static func windowPosition(_ window: AXUIElement) -> CGPoint? {
