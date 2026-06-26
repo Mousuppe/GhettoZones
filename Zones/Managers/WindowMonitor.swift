@@ -25,13 +25,14 @@ final class WindowMonitor {
     private var pendingSnapContext: SnapContext?
 
     private struct SnapContext {
-        let window: AXUIElement
+        let window: AXUIElement?
         let zone: Zone
         let layout: ZoneLayout
         let displayID: CGDirectDisplayID
         let frame: CGRect
         let bundleID: String?
         let windowPID: pid_t?
+        let fallbackFrame: CGRect?
     }
 
     private static let snapRetryDelays: [TimeInterval] = [0.12, 0.2, 0.35, 0.5, 0.75, 1.0, 1.5]
@@ -144,6 +145,10 @@ final class WindowMonitor {
             isLeftMouseDown = true
             windowLookupAttempts = 0
             captureDraggedWindow(at: point)
+            if event.isCommandPressed {
+                commandInvolvedInDrag = true
+                beginCommandDragIfNeeded()
+            }
 
         case .leftMouseDragged:
             isLeftMouseDown = true
@@ -161,6 +166,9 @@ final class WindowMonitor {
             isLeftMouseDown = false
             resolveDraggedWindowIfNeeded(at: point)
             ensureDraggedWindowForSnap(at: point)
+            if commandInvolvedInDrag || isCommandDragActive {
+                refreshSnapTargetAtRelease(at: point)
+            }
             if shouldSnapOnRelease {
                 performSnap(at: point)
             }
@@ -176,7 +184,8 @@ final class WindowMonitor {
                 continueCommandDrag(at: point)
             } else if isCommandDragActive || commandInvolvedInDrag {
                 ensureDraggedWindowForSnap(at: point)
-                if lastHoveredZoneID != nil || pendingSnapContext != nil {
+                refreshSnapTargetAtRelease(at: point)
+                if shouldSnapOnRelease {
                     performSnap(at: point)
                 }
                 cancelCommandDragPreview()
@@ -195,36 +204,51 @@ final class WindowMonitor {
     }
 
     private func refreshDraggedWindowDuringCommandDrag(at point: NSPoint) {
+        if let trackedPID = draggedWindowPID,
+           let existing = draggedWindow,
+           WindowAccessibility.windowFrame(existing) != nil {
+            var pid: pid_t = 0
+            if AXUIElementGetPid(existing, &pid) == .success, pid == trackedPID {
+                return
+            }
+        }
+
         guard let window = WindowAccessibility.windowElementUnderCursor(at: point, preferWindowList: true),
               !isUserTyping(in: window) else { return }
+
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else { return }
+        if let trackedPID = draggedWindowPID, trackedPID != pid { return }
+
+        assignDraggedWindow(window, pid: pid)
+    }
+
+    private func assignDraggedWindow(_ window: AXUIElement, pid: pid_t? = nil) {
         draggedWindow = window
         draggedBundleID = bundleIdentifier(for: window)
         initialWindowFrame = WindowAccessibility.windowFrame(window)
-        var pid: pid_t = 0
-        if AXUIElementGetPid(window, &pid) == .success {
+        if let pid {
             draggedWindowPID = pid
+        } else {
+            var resolvedPID: pid_t = 0
+            if AXUIElementGetPid(window, &resolvedPID) == .success {
+                draggedWindowPID = resolvedPID
+            }
         }
     }
 
     private func captureDraggedWindow(at point: NSPoint) {
         if let window = WindowAccessibility.windowElementUnderCursor(at: point),
            !isUserTyping(in: window) {
-            draggedWindow = window
-            draggedBundleID = bundleIdentifier(for: window)
-            initialWindowFrame = WindowAccessibility.windowFrame(window)
-            var pid: pid_t = 0
-            if AXUIElementGetPid(window, &pid) == .success {
-                draggedWindowPID = pid
-            }
+            assignDraggedWindow(window)
         } else if let window = WindowAccessibility.frontmostWindow(),
                   !isUserTyping(in: window) {
-            draggedWindow = window
-            draggedBundleID = bundleIdentifier(for: window)
-            initialWindowFrame = WindowAccessibility.windowFrame(window)
+            assignDraggedWindow(window)
         } else {
             draggedWindow = nil
             draggedBundleID = nil
             initialWindowFrame = nil
+            draggedWindowPID = nil
         }
     }
 
@@ -233,18 +257,10 @@ final class WindowMonitor {
         windowLookupAttempts += 1
         if let window = WindowAccessibility.windowElementUnderCursor(at: point),
            !isUserTyping(in: window) {
-            draggedWindow = window
-            draggedBundleID = bundleIdentifier(for: window)
-            initialWindowFrame = WindowAccessibility.windowFrame(window)
-            var pid: pid_t = 0
-            if AXUIElementGetPid(window, &pid) == .success {
-                draggedWindowPID = pid
-            }
+            assignDraggedWindow(window)
         } else if windowLookupAttempts > 5, let window = WindowAccessibility.frontmostWindow(),
                   !isUserTyping(in: window) {
-            draggedWindow = window
-            draggedBundleID = bundleIdentifier(for: window)
-            initialWindowFrame = WindowAccessibility.windowFrame(window)
+            assignDraggedWindow(window)
         }
     }
 
@@ -335,9 +351,58 @@ final class WindowMonitor {
     @MainActor
     private func performSnap(at point: NSPoint) {
         guard let zoneManager else { return }
-        let context = pendingSnapContext ?? makeSnapContext(at: point, zoneManager: zoneManager)
-        guard let context else { return }
+        guard let context = resolvedSnapContext(at: point, zoneManager: zoneManager) else { return }
         scheduleSnap(context, zoneManager: zoneManager)
+    }
+
+    @MainActor
+    private func refreshSnapTargetAtRelease(at point: NSPoint) {
+        guard let zoneManager else { return }
+        guard let display = zoneManager.displayManager.display(for: point),
+              let layout = zoneManager.activeLayout(for: display.id),
+              let zone = zoneManager.zone(at: point, on: display.id) else {
+            return
+        }
+
+        lastHoveredZoneID = zone.id
+        lastHoveredDisplayID = display.id
+        cachePendingSnapContext(
+            zone: zone,
+            layout: layout,
+            displayID: display.id,
+            at: point,
+            zoneManager: zoneManager
+        )
+    }
+
+    @MainActor
+    private func resolvedSnapContext(at point: NSPoint, zoneManager: ZoneManager) -> SnapContext? {
+        guard let baseContext = pendingSnapContext ?? makeSnapContext(at: point, zoneManager: zoneManager) else {
+            return nil
+        }
+
+        if let window = baseContext.window,
+           WindowAccessibility.windowFrame(window) != nil {
+            return baseContext
+        }
+
+        guard let window = resolveWindowForSnap(at: point) else { return baseContext }
+
+        var pid: pid_t = 0
+        if AXUIElementGetPid(window, &pid) != .success {
+            pid = baseContext.windowPID ?? draggedWindowPID ?? 0
+        }
+
+        return SnapContext(
+            window: window,
+            zone: baseContext.zone,
+            layout: baseContext.layout,
+            displayID: baseContext.displayID,
+            frame: baseContext.frame,
+            bundleID: baseContext.bundleID ?? draggedBundleID ?? bundleIdentifier(for: window),
+            windowPID: pid > 0 ? pid : baseContext.windowPID ?? draggedWindowPID,
+            fallbackFrame: baseContext.fallbackFrame ?? initialWindowFrame
+        )
     }
 
     @MainActor
@@ -349,19 +414,22 @@ final class WindowMonitor {
         zoneManager: ZoneManager
     ) {
         guard let frame = zoneManager.displayManager.absoluteFrame(for: zone, on: displayID) else { return }
-        guard let window = draggedWindow ?? resolveWindowForSnap(at: point) else { return }
-        var pid: pid_t = 0
-        if AXUIElementGetPid(window, &pid) != .success {
+
+        let window = draggedWindow ?? resolveWindowForSnap(at: point)
+        var pid: pid_t = draggedWindowPID ?? 0
+        if let window, AXUIElementGetPid(window, &pid) != .success {
             pid = draggedWindowPID ?? 0
         }
+
         pendingSnapContext = SnapContext(
             window: window,
             zone: zone,
             layout: layout,
             displayID: displayID,
             frame: frame,
-            bundleID: draggedBundleID ?? bundleIdentifier(for: window),
-            windowPID: pid > 0 ? pid : draggedWindowPID
+            bundleID: draggedBundleID ?? window.flatMap(bundleIdentifier(for:)),
+            windowPID: pid > 0 ? pid : draggedWindowPID,
+            fallbackFrame: initialWindowFrame
         )
     }
 
@@ -386,21 +454,23 @@ final class WindowMonitor {
             displayID: displayID,
             frame: frame,
             bundleID: draggedBundleID ?? bundleIdentifier(for: window),
-            windowPID: draggedWindowPID
+            windowPID: draggedWindowPID,
+            fallbackFrame: initialWindowFrame
         )
     }
 
     @MainActor
     private func scheduleSnap(_ context: SnapContext, zoneManager: ZoneManager) {
         let captured = context
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.snapRetryDelays[0]) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.snapRetryDelays[0]))
             Self.applySnap(captured, zoneManager: zoneManager, attempt: 0)
         }
     }
 
     @MainActor
     private static func applySnap(_ context: SnapContext, zoneManager: ZoneManager, attempt: Int) {
-        let window = resolveWindow(for: context, attempt: attempt)
+        guard let window = resolveWindow(for: context, attempt: attempt) else { return }
         let success = WindowAccessibility.setWindowFrame(window, frame: context.frame)
         if success, attempt == 0, let bundleID = context.bundleID, !bundleID.isEmpty {
             zoneManager.rememberPosition(
@@ -412,20 +482,22 @@ final class WindowMonitor {
         }
         guard !success, attempt + 1 < snapRetryDelays.count else { return }
         let delay = snapRetryDelays[attempt + 1] - snapRetryDelays[attempt]
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
             applySnap(context, zoneManager: zoneManager, attempt: attempt + 1)
         }
     }
 
-    private static func resolveWindow(for context: SnapContext, attempt: Int) -> AXUIElement {
-        if attempt == 0 {
-            return context.window
+    private static func resolveWindow(for context: SnapContext, attempt: Int) -> AXUIElement? {
+        if let window = context.window,
+           WindowAccessibility.windowFrame(window) != nil {
+            return window
         }
         if let pid = context.windowPID,
            let window = WindowAccessibility.frontmostWindow(for: pid) {
             return window
         }
-        if let frame = WindowAccessibility.windowFrame(context.window),
+        if let frame = context.fallbackFrame ?? context.window.flatMap(WindowAccessibility.windowFrame(_:)),
            let window = WindowAccessibility.windowMatching(frame: frame) {
             return window
         }
@@ -455,6 +527,9 @@ final class WindowMonitor {
         layout: ZoneLayout,
         zoneManager: ZoneManager
     ) -> Zone? {
+        if let point, let zone = zoneManager.zone(at: point, on: displayID) {
+            return zone
+        }
         if let lastHoveredZoneID,
            let zone = layout.zones.first(where: { $0.id == lastHoveredZoneID }) {
             return zone
@@ -462,9 +537,6 @@ final class WindowMonitor {
         if let highlightedID = zoneManager.highlightedZoneID,
            let zone = layout.zones.first(where: { $0.id == highlightedID }) {
             return zone
-        }
-        if let point {
-            return zoneManager.zone(at: point, on: displayID)
         }
         return nil
     }
