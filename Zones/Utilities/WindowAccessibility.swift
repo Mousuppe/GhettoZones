@@ -4,11 +4,78 @@ import CoreGraphics
 
 enum WindowAccessibility {
     /// Returns the standard window under the cursor, using AX first then CGWindowList.
-    static func windowElementUnderCursor(at point: NSPoint) -> AXUIElement? {
+    static func windowElementUnderCursor(at point: NSPoint, preferWindowList: Bool = false) -> AXUIElement? {
+        if preferWindowList, let window = windowFromWindowList(at: point) {
+            return window
+        }
         if let window = windowFromAccessibility(at: point) {
             return window
         }
         return windowFromWindowList(at: point)
+    }
+
+    static func focusedWindow() -> AXUIElement? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedWindowAttribute as CFString, &focusedRef) == .success,
+              let focusedRef else { return nil }
+        let window = focusedRef as! AXUIElement
+        return isStandardWindow(window) ? window : nil
+    }
+
+    static func frontmostWindow(for pid: pid_t) -> AXUIElement? {
+        let appElement = AXUIElementCreateApplication(pid)
+        var windowRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
+           let windowRef {
+            let window = windowRef as! AXUIElement
+            if isStandardWindow(window) { return window }
+        }
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let windows = windowsRef as? [AXUIElement] else { return nil }
+        return windows.first(where: isStandardWindow(_:))
+    }
+
+    static func windowMatching(frame: CGRect) -> AXUIElement? {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+
+        let mainHeight = NSScreen.screens.map(\.frame.maxY).max() ?? NSScreen.main?.frame.maxY ?? 0
+
+        for info in infoList {
+            guard let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat],
+                  let x = boundsDict["X"],
+                  let y = boundsDict["Y"],
+                  let width = boundsDict["Width"],
+                  let height = boundsDict["Height"],
+                  let layer = info[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t else {
+                continue
+            }
+
+            let appKitBounds = CGRect(
+                x: x,
+                y: mainHeight - y - height,
+                width: width,
+                height: height
+            )
+            guard framesMatch(appKitBounds, frame, tolerance: 8) else { continue }
+
+            if let ownerName = info[kCGWindowOwnerName as String] as? String,
+               ["Dock", "WindowManager", "GhettoZones"].contains(ownerName) {
+                continue
+            }
+
+            if let window = windowElement(for: ownerPID, expectedBounds: appKitBounds) {
+                return window
+            }
+        }
+
+        return nil
     }
 
     /// Focused window of the frontmost app — fallback while dragging.
@@ -217,18 +284,12 @@ enum WindowAccessibility {
     }
 
     private static func setWindowPosition(_ window: AXUIElement, position: CGPoint) {
-        var settable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(window, kAXPositionAttribute as CFString, &settable) == .success,
-              settable.boolValue else { return }
         var point = position
         guard let value = AXValueCreate(.cgPoint, &point) else { return }
         AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value)
     }
 
     private static func setWindowSize(_ window: AXUIElement, size: CGSize) {
-        var settable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(window, kAXSizeAttribute as CFString, &settable) == .success,
-              settable.boolValue else { return }
         var dimensions = size
         guard let value = AXValueCreate(.cgSize, &dimensions) else { return }
         AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
