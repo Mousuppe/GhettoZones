@@ -132,7 +132,7 @@ final class WindowMonitor {
 
     @MainActor
     private func handleCGEvent(_ event: CGEvent, type: CGEventType) {
-        guard let zoneManager, zoneManager.snappingEnabled else { return }
+        guard let zoneManager, zoneManager.snappingEnabled, zoneManager.isAccessibilityGranted else { return }
 
         if !isListeningForDragEvents {
             startEventTap()
@@ -214,7 +214,7 @@ final class WindowMonitor {
         }
 
         guard let window = WindowAccessibility.windowElementUnderCursor(at: point, preferWindowList: true),
-              !isUserTyping(in: window) else { return }
+              !isTextEntryAtCursor(point) else { return }
 
         var pid: pid_t = 0
         guard AXUIElementGetPid(window, &pid) == .success else { return }
@@ -238,11 +238,17 @@ final class WindowMonitor {
     }
 
     private func captureDraggedWindow(at point: NSPoint) {
-        if let window = WindowAccessibility.windowElementUnderCursor(at: point),
-           !isUserTyping(in: window) {
+        if isTextEntryAtCursor(point) {
+            draggedWindow = nil
+            draggedBundleID = nil
+            initialWindowFrame = nil
+            draggedWindowPID = nil
+            return
+        }
+
+        if let window = WindowAccessibility.windowElementUnderCursor(at: point) {
             assignDraggedWindow(window)
-        } else if let window = WindowAccessibility.frontmostWindow(),
-                  !isUserTyping(in: window) {
+        } else if let window = WindowAccessibility.frontmostWindow() {
             assignDraggedWindow(window)
         } else {
             draggedWindow = nil
@@ -255,11 +261,9 @@ final class WindowMonitor {
     private func resolveDraggedWindowIfNeeded(at point: NSPoint) {
         guard draggedWindow == nil, windowLookupAttempts < 30 else { return }
         windowLookupAttempts += 1
-        if let window = WindowAccessibility.windowElementUnderCursor(at: point),
-           !isUserTyping(in: window) {
+        if let window = WindowAccessibility.windowElementUnderCursor(at: point) {
             assignDraggedWindow(window)
-        } else if windowLookupAttempts > 5, let window = WindowAccessibility.frontmostWindow(),
-                  !isUserTyping(in: window) {
+        } else if windowLookupAttempts > 5, let window = WindowAccessibility.frontmostWindow() {
             assignDraggedWindow(window)
         }
     }
@@ -329,16 +333,13 @@ final class WindowMonitor {
            let window = WindowAccessibility.frontmostWindow(for: pid) {
             return window
         }
-        if let window = WindowAccessibility.windowElementUnderCursor(at: point, preferWindowList: true),
-           !isUserTyping(in: window) {
+        if let window = WindowAccessibility.windowElementUnderCursor(at: point, preferWindowList: true) {
             return window
         }
-        if let window = WindowAccessibility.focusedWindow(),
-           !isUserTyping(in: window) {
+        if let window = WindowAccessibility.focusedWindow() {
             return window
         }
-        if let window = WindowAccessibility.frontmostWindow(),
-           !isUserTyping(in: window) {
+        if let window = WindowAccessibility.frontmostWindow() {
             return window
         }
         if let frame = initialWindowFrame,
@@ -461,18 +462,14 @@ final class WindowMonitor {
 
     @MainActor
     private func scheduleSnap(_ context: SnapContext, zoneManager: ZoneManager) {
-        let captured = context
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(Self.snapRetryDelays[0]))
-            Self.applySnap(captured, zoneManager: zoneManager, attempt: 0)
-        }
+        scheduleSnap(context, zoneManager: zoneManager, remember: true)
     }
 
     @MainActor
-    private static func applySnap(_ context: SnapContext, zoneManager: ZoneManager, attempt: Int) {
+    private static func applySnap(_ context: SnapContext, zoneManager: ZoneManager, attempt: Int, remember: Bool = true) {
         guard let window = resolveWindow(for: context, attempt: attempt) else { return }
         let success = WindowAccessibility.setWindowFrame(window, frame: context.frame)
-        if success, attempt == 0, let bundleID = context.bundleID, !bundleID.isEmpty {
+        if success, remember, attempt == 0, let bundleID = context.bundleID, !bundleID.isEmpty {
             zoneManager.rememberPosition(
                 bundleIdentifier: bundleID,
                 zone: context.zone,
@@ -484,7 +481,7 @@ final class WindowMonitor {
         let delay = snapRetryDelays[attempt + 1] - snapRetryDelays[attempt]
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(delay))
-            applySnap(context, zoneManager: zoneManager, attempt: attempt + 1)
+            applySnap(context, zoneManager: zoneManager, attempt: attempt + 1, remember: remember)
         }
     }
 
@@ -589,7 +586,6 @@ final class WindowMonitor {
     @MainActor
     func snapFocusedWindow(to zone: Zone, on displayID: CGDirectDisplayID, zoneManager: ZoneManager) {
         guard let window = focusedWindowElement(),
-              !isUserTyping(in: window),
               let layout = zoneManager.activeLayout(for: displayID) else { return }
         draggedBundleID = bundleIdentifier(for: window)
         snapWindow(window, to: zone, displayID: displayID, zoneManager: zoneManager, layout: layout)
@@ -614,20 +610,37 @@ final class WindowMonitor {
         remember: Bool = true
     ) {
         guard let frame = zoneManager.displayManager.absoluteFrame(for: zone, on: displayID) else { return }
-        WindowAccessibility.setWindowFrame(window, frame: frame)
-        if remember, let bundleID = draggedBundleID ?? bundleIdentifier(for: window) {
-            zoneManager.rememberPosition(
-                bundleIdentifier: bundleID,
-                zone: zone,
-                layout: layout,
-                displayID: displayID
-            )
+
+        var pid: pid_t = 0
+        if AXUIElementGetPid(window, &pid) != .success {
+            pid = 0
+        }
+
+        let context = SnapContext(
+            window: window,
+            zone: zone,
+            layout: layout,
+            displayID: displayID,
+            frame: frame,
+            bundleID: draggedBundleID ?? bundleIdentifier(for: window),
+            windowPID: pid > 0 ? pid : nil,
+            fallbackFrame: WindowAccessibility.windowFrame(window)
+        )
+        scheduleSnap(context, zoneManager: zoneManager, remember: remember)
+    }
+
+    @MainActor
+    private func scheduleSnap(_ context: SnapContext, zoneManager: ZoneManager, remember: Bool = true) {
+        let captured = context
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.snapRetryDelays[0]))
+            Self.applySnap(captured, zoneManager: zoneManager, attempt: 0, remember: remember)
         }
     }
 
     @MainActor
     func moveFocusedWindowToAdjacentMonitor(direction: ZoneDirection, zoneManager: ZoneManager) {
-        guard let window = focusedWindowElement(), !isUserTyping(in: window) else { return }
+        guard let window = focusedWindowElement() else { return }
         guard var currentFrame = WindowAccessibility.windowFrame(window) else { return }
         let center = CGPoint(x: currentFrame.midX, y: currentFrame.midY)
         guard let currentDisplay = zoneManager.displayManager.display(for: NSPoint(x: center.x, y: center.y)) else { return }
@@ -719,14 +732,23 @@ final class WindowMonitor {
         return role == kAXStandardWindowSubrole
     }
 
-    private func isUserTyping(in window: AXUIElement) -> Bool {
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(window, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focused = focusedRef else { return false }
+    private func isTextEntryAtCursor(_ point: NSPoint) -> Bool {
+        let systemWide = AXUIElementCreateSystemWide()
+        var element: AXUIElement?
+        let axPoint = point.quartzScreenPoint
+        guard AXUIElementCopyElementAtPosition(
+            systemWide,
+            Float(axPoint.x),
+            Float(axPoint.y),
+            &element
+        ) == .success,
+              let element else { return false }
+
         var roleRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXRoleAttribute as CFString, &roleRef) == .success,
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
               let role = roleRef as? String else { return false }
-        return role == kAXTextFieldRole || role == kAXTextAreaRole
+
+        return role == kAXTextFieldRole || role == kAXTextAreaRole || role == kAXComboBoxRole
     }
 
 }

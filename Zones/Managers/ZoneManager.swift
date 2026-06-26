@@ -198,6 +198,25 @@ final class ZoneManager: ObservableObject {
         return layout.zones.first { $0.frame.contains(relativePoint) }
     }
 
+    /// Adjacent zone when already snapped, otherwise the outermost zone in that direction.
+    func snapTargetZone(from zone: Zone?, direction: ZoneDirection, on displayID: CGDirectDisplayID) -> Zone? {
+        if let zone, let adjacent = adjacentZone(from: zone, direction: direction, on: displayID) {
+            return adjacent
+        }
+        guard let layout = activeLayout(for: displayID) else { return nil }
+        let zones = layout.zones
+        switch direction {
+        case .left:
+            return zones.min(by: { $0.frame.minX < $1.frame.minX })
+        case .right:
+            return zones.max(by: { $0.frame.maxX < $1.frame.maxX })
+        case .up:
+            return zones.max(by: { $0.frame.maxY < $1.frame.maxY })
+        case .down:
+            return zones.min(by: { $0.frame.minY < $1.frame.minY })
+        }
+    }
+
     func adjacentZone(from zone: Zone, direction: ZoneDirection, on displayID: CGDirectDisplayID) -> Zone? {
         guard let layout = activeLayout(for: displayID) else { return nil }
         let zones = layout.zones

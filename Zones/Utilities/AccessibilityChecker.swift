@@ -4,8 +4,8 @@ import AppKit
 enum AccessibilityChecker {
     /// Returns true when Accessibility permission is active for this process.
     static func isGranted() -> Bool {
-        if AXIsProcessTrusted() { return true }
-        return probeAXAccess()
+        guard AXIsProcessTrusted() || probeAXAccess() else { return false }
+        return canModifyWindows()
     }
 
     /// Read access alone is not enough to resize windows — verify AX can modify a standard app window.

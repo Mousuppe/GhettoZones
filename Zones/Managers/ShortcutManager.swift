@@ -71,8 +71,7 @@ final class ShortcutManager {
         guard let display = zoneManager.displayManager.display(for: center) else { return }
         let current = WindowMonitor.shared.currentFocusedZone(on: display.id, zoneManager: zoneManager)
             ?? zoneManager.zone(at: center, on: display.id)
-        guard let current else { return }
-        guard let target = zoneManager.adjacentZone(from: current, direction: direction, on: display.id) else { return }
+        guard let target = zoneManager.snapTargetZone(from: current, direction: direction, on: display.id) else { return }
         WindowMonitor.shared.snapFocusedWindow(to: target, on: display.id, zoneManager: zoneManager)
     }
 
