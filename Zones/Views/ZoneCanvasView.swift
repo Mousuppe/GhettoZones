@@ -10,7 +10,8 @@ struct ZoneCanvasView: View {
     @State private var resizingZoneID: UUID?
     @State private var resizeHandle: ResizeHandle?
     @State private var resizeStartFrame: CGRect?
-    @State private var dragOffset: CGSize = .zero
+    @State private var moveZoneID: UUID?
+    @State private var moveStartOrigin: CGPoint?
 
     private let gridSpacing: CGFloat = 20
     private let minZoneSize: CGFloat = 0.05
@@ -41,20 +42,14 @@ struct ZoneCanvasView: View {
             .gesture(
                 DragGesture(minimumDistance: 4)
                     .onChanged { value in
-                        if resizingZoneID != nil {
-                            updateResize(value: value, canvasSize: canvasSize)
-                        } else if selectedZoneID == nil {
-                            if drawingStart == nil { drawingStart = value.startLocation }
-                            drawingCurrent = value.location
-                        }
+                        guard resizingZoneID == nil, selectedZoneID == nil else { return }
+                        if drawingStart == nil { drawingStart = value.startLocation }
+                        drawingCurrent = value.location
                     }
-                    .onEnded { value in
-                        if let zoneID = resizingZoneID {
-                            finishResize(zoneID: zoneID)
-                        } else if drawingStart != nil {
+                    .onEnded { _ in
+                        guard resizingZoneID == nil, selectedZoneID == nil else { return }
+                        if drawingStart != nil {
                             finishDrawing(canvasSize: canvasSize)
-                        } else if let zoneID = selectedZoneID {
-                            moveZone(zoneID: zoneID, translation: value.translation, canvasSize: canvasSize)
                         }
                     }
             )
@@ -93,6 +88,16 @@ struct ZoneCanvasView: View {
         .frame(width: rect.width * canvasSize.width, height: rect.height * canvasSize.height)
         .position(x: rect.midX * canvasSize.width, y: (1 - rect.midY) * canvasSize.height)
         .onTapGesture { selectedZoneID = zone.id }
+        .gesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    guard isSelected, resizingZoneID == nil else { return }
+                    updateMove(value: value, zoneID: zone.id, canvasSize: canvasSize)
+                }
+                .onEnded { _ in
+                    finishMove()
+                }
+        )
     }
 
     @ViewBuilder
@@ -100,16 +105,22 @@ struct ZoneCanvasView: View {
         ForEach(ResizeHandle.allCases, id: \.self) { handle in
             Circle()
                 .fill(Color.accentColor)
-                .frame(width: 8, height: 8)
+                .frame(width: 10, height: 10)
+                .padding(6)
+                .contentShape(Rectangle())
                 .position(handlePosition(handle, zone: zone, canvasSize: canvasSize))
-                .gesture(
+                .highPriorityGesture(
                     DragGesture(minimumDistance: 0)
-                        .onChanged { _ in
+                        .onChanged { value in
                             if resizingZoneID == nil {
                                 resizingZoneID = zone.id
                                 resizeHandle = handle
                                 resizeStartFrame = zone.frame
                             }
+                            updateResize(value: value, canvasSize: canvasSize)
+                        }
+                        .onEnded { _ in
+                            finishResize(zoneID: zone.id)
                         }
                 )
         }
@@ -149,7 +160,23 @@ struct ZoneCanvasView: View {
         }
     }
 
-    // MARK: - Drawing
+    private func setZoneFrame(at index: Int, frame: CGRect) {
+        var updated = layout
+        updated.zones[index].frame = frame
+        layout = updated
+    }
+
+    private func appendZone(_ zone: Zone) {
+        var updated = layout
+        updated.zones.append(zone)
+        layout = updated
+    }
+
+    private func removeZone(id: UUID) {
+        var updated = layout
+        updated.zones.removeAll { $0.id == id }
+        layout = updated
+    }
 
     private func finishDrawing(canvasSize: CGSize) {
         guard let start = drawingStart, let end = drawingCurrent else { return }
@@ -164,7 +191,7 @@ struct ZoneCanvasView: View {
             name: String(format: NSLocalizedString("Zone %d", comment: "Default zone name"), count),
             frame: rect
         )
-        layout.zones.append(newZone)
+        appendZone(newZone)
         selectedZoneID = newZone.id
         drawingStart = nil
         drawingCurrent = nil
@@ -180,14 +207,24 @@ struct ZoneCanvasView: View {
 
     // MARK: - Move & resize
 
-    private func moveZone(zoneID: UUID, translation: CGSize, canvasSize: CGSize) {
+    private func updateMove(value: DragGesture.Value, zoneID: UUID, canvasSize: CGSize) {
         guard let index = layout.zones.firstIndex(where: { $0.id == zoneID }) else { return }
+        if moveZoneID != zoneID {
+            moveZoneID = zoneID
+            moveStartOrigin = layout.zones[index].frame.origin
+        }
+        guard let startOrigin = moveStartOrigin else { return }
         var frame = layout.zones[index].frame
-        frame.origin.x += translation.width / canvasSize.width
-        frame.origin.y -= translation.height / canvasSize.height
+        frame.origin.x = startOrigin.x + value.translation.width / canvasSize.width
+        frame.origin.y = startOrigin.y - value.translation.height / canvasSize.height
         frame.origin.x = max(0, min(1 - frame.width, frame.origin.x))
         frame.origin.y = max(0, min(1 - frame.height, frame.origin.y))
-        layout.zones[index].frame = frame
+        setZoneFrame(at: index, frame: frame)
+    }
+
+    private func finishMove() {
+        moveZoneID = nil
+        moveStartOrigin = nil
     }
 
     private func updateResize(value: DragGesture.Value, canvasSize: CGSize) {
@@ -210,7 +247,7 @@ struct ZoneCanvasView: View {
         }
         frame.size.width = max(minZoneSize, frame.size.width)
         frame.size.height = max(minZoneSize, frame.size.height)
-        layout.zones[index].frame = frame
+        setZoneFrame(at: index, frame: frame)
     }
 
     private func finishResize(zoneID: UUID) {
@@ -222,7 +259,7 @@ struct ZoneCanvasView: View {
 
     private func deleteSelectedZone() {
         guard let id = selectedZoneID else { return }
-        layout.zones.removeAll { $0.id == id }
+        removeZone(id: id)
         selectedZoneID = nil
     }
 }

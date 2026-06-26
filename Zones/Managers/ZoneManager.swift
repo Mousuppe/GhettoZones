@@ -69,10 +69,9 @@ final class ZoneManager: ObservableObject {
 
     func refreshPermissionState() {
         let granted = AccessibilityChecker.isGranted()
-        let canModify = AccessibilityChecker.canModifyWindows()
         let previouslyGranted = isAccessibilityGranted
         isAccessibilityGranted = granted
-        permissionWarning = !granted || !canModify
+        permissionWarning = !granted
         if granted && !previouslyGranted {
             NotificationCenter.default.post(name: .accessibilityPermissionGranted, object: nil)
         }

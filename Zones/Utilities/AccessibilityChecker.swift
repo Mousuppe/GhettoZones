@@ -8,10 +8,10 @@ enum AccessibilityChecker {
         return probeAXAccess()
     }
 
-    /// Read access alone is not enough to resize windows — verify AX can modify the focused window.
+    /// Read access alone is not enough to resize windows — verify AX can modify a standard app window.
     static func canModifyWindows() -> Bool {
         guard isGranted() else { return false }
-        guard let window = WindowAccessibility.focusedWindow() else { return AXIsProcessTrusted() }
+        guard let window = focusedWindowForPermissionCheck() else { return true }
         var sizeSettable = DarwinBoolean(false)
         var positionSettable = DarwinBoolean(false)
         let sizeOK = AXUIElementIsAttributeSettable(window, kAXSizeAttribute as CFString, &sizeSettable) == .success
@@ -19,6 +19,14 @@ enum AccessibilityChecker {
         let positionOK = AXUIElementIsAttributeSettable(window, kAXPositionAttribute as CFString, &positionSettable) == .success
             && positionSettable.boolValue
         return sizeOK && positionOK
+    }
+
+    private static func focusedWindowForPermissionCheck() -> AXUIElement? {
+        guard let window = WindowAccessibility.focusedWindow() else { return nil }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else { return window }
+        if pid == ProcessInfo.processInfo.processIdentifier { return nil }
+        return window
     }
 
     /// macOS can lag updating `AXIsProcessTrusted` after the user grants access.
