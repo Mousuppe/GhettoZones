@@ -3,14 +3,16 @@ import AppKit
 
 enum AccessibilityChecker {
     /// Returns true when Accessibility permission is active for this process.
+    /// Prefer `AXIsProcessTrusted`; fall back to a live AX probe because macOS can lag after grant.
     static func isGranted() -> Bool {
-        guard AXIsProcessTrusted() || probeAXAccess() else { return false }
-        return canModifyWindows()
+        if AXIsProcessTrusted() { return true }
+        return probeAXAccess()
     }
 
     /// Read access alone is not enough to resize windows — verify AX can modify a standard app window.
+    /// Must not call `isGranted()` (that would recurse when permission checks chain through here).
     static func canModifyWindows() -> Bool {
-        guard isGranted() else { return false }
+        guard AXIsProcessTrusted() || probeAXAccess() else { return false }
         guard let window = focusedWindowForPermissionCheck() else { return true }
         var sizeSettable = DarwinBoolean(false)
         var positionSettable = DarwinBoolean(false)

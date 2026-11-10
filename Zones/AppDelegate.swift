@@ -150,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func presentZoneEditor() {
         if zoneEditorWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+                contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
                 styleMask: [.titled, .closable, .resizable, .miniaturizable],
                 backing: .buffered,
                 defer: false
@@ -158,13 +158,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.title = NSLocalizedString("GhettoZones Zone Editor", comment: "Zone editor window title")
             window.center()
             window.isReleasedWhenClosed = false
-            window.contentViewController = NSHostingController(
-                rootView: ZoneEditorView(zoneManager: zoneManager)
+            window.minSize = NSSize(width: 520, height: 400)
+            let hosting = NSHostingController(
+                rootView: ZoneEditorView(zoneManager: zoneManager) { [weak self] in
+                    self?.closeZoneEditor()
+                }
             )
+            hosting.view.frame = NSRect(origin: .zero, size: NSSize(width: 640, height: 520))
+            window.contentViewController = hosting
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.zoneEditorWindow?.contentViewController = nil
+                    self?.zoneEditorWindow = nil
+                }
+            }
             zoneEditorWindow = window
         }
         zoneEditorWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func closeZoneEditor() {
+        zoneEditorWindow?.orderOut(nil)
+        zoneEditorWindow?.contentViewController = nil
+        zoneEditorWindow = nil
     }
 
     private func presentSettings() {

@@ -249,29 +249,61 @@ enum WindowAccessibility {
         isResizableWindow(window)
     }
 
+    /// Global AppKit maxY used to convert to/from Accessibility (Quartz) coordinates.
+    private static var axCoordinateSpaceHeight: CGFloat {
+        NSScreen.screens.map(\.frame.maxY).max() ?? NSScreen.main?.frame.maxY ?? 0
+    }
+
+    /// AppKit bottom-left frame for an AX window (converts from Quartz top-left AX position).
     static func windowFrame(_ window: AXUIElement) -> CGRect? {
-        guard let position = windowPosition(window),
+        guard let axTopLeft = rawAXPosition(window),
               let size = windowSize(window) else { return nil }
-        return CGRect(origin: position, size: size)
+        let appKitOrigin = CGPoint(
+            x: axTopLeft.x,
+            y: axCoordinateSpaceHeight - axTopLeft.y - size.height
+        )
+        return CGRect(origin: appKitOrigin, size: size)
+    }
+
+    struct SetFrameResult {
+        var success: Bool
+        var before: CGRect?
+        var after: CGRect?
+        var sizeError: Int
+        var positionError: Int
     }
 
     /// Resize and move a window to fill a zone frame (yabai / Rectangle triple-set pattern).
+    /// `frame` is in AppKit global coordinates (origin bottom-left).
     @discardableResult
     static func setWindowFrame(_ window: AXUIElement, frame: CGRect) -> Bool {
+        setWindowFrameDetailed(window, frame: frame).success
+    }
+
+    @discardableResult
+    static func setWindowFrameDetailed(_ window: AXUIElement, frame: CGRect) -> SetFrameResult {
         let target = frame.integral
+        let before = windowFrame(window)
 
         var pid: pid_t = 0
-        guard AXUIElementGetPid(window, &pid) == .success else { return false }
+        guard AXUIElementGetPid(window, &pid) == .success else {
+            return SetFrameResult(success: false, before: before, after: nil, sizeError: -1, positionError: -1)
+        }
         if let app = NSRunningApplication(processIdentifier: pid) {
-            app.activate(options: .activateIgnoringOtherApps)
+            app.activate(options: [.activateAllWindows])
         }
 
         let appElement = AXUIElementCreateApplication(pid)
         let hadEnhancedUI = disableEnhancedUIIfNeeded(appElement)
 
-        setWindowSize(window, size: target.size)
-        setWindowPosition(window, position: target.origin)
-        setWindowSize(window, size: target.size)
+        // Raise the window so apps that ignore AX while backgrounded still accept resize.
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+
+        let sizeError1 = setWindowSize(window, size: target.size)
+        let positionError = setWindowPosition(window, appKitBottomLeft: target.origin, size: target.size)
+        let sizeError2 = setWindowSize(window, size: target.size)
+        // Second position pass — some apps clamp the first move against the old size.
+        let positionError2 = setWindowPosition(window, appKitBottomLeft: target.origin, size: target.size)
 
         if hadEnhancedUI {
             AXUIElementSetAttributeValue(
@@ -281,11 +313,18 @@ enum WindowAccessibility {
             )
         }
 
-        guard let actual = windowFrame(window) else { return false }
-        return framesMatch(actual, target, tolerance: 8)
+        let after = windowFrame(window)
+        let matched = after.map { framesMatch($0, target, tolerance: 12) } ?? false
+        return SetFrameResult(
+            success: matched,
+            before: before,
+            after: after,
+            sizeError: sizeError2 != 0 ? sizeError2 : sizeError1,
+            positionError: positionError2 != 0 ? positionError2 : positionError
+        )
     }
 
-    private static func windowPosition(_ window: AXUIElement) -> CGPoint? {
+    private static func rawAXPosition(_ window: AXUIElement) -> CGPoint? {
         var positionRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionRef) == .success,
               let positionRef else { return nil }
@@ -303,16 +342,26 @@ enum WindowAccessibility {
         return size
     }
 
-    private static func setWindowPosition(_ window: AXUIElement, position: CGPoint) {
-        var point = position
-        guard let value = AXValueCreate(.cgPoint, &point) else { return }
-        AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value)
+    /// Sets AX position from an AppKit bottom-left origin + size (AX wants Quartz top-left).
+    @discardableResult
+    private static func setWindowPosition(
+        _ window: AXUIElement,
+        appKitBottomLeft: CGPoint,
+        size: CGSize
+    ) -> Int {
+        var axTopLeft = CGPoint(
+            x: appKitBottomLeft.x,
+            y: axCoordinateSpaceHeight - appKitBottomLeft.y - size.height
+        )
+        guard let value = AXValueCreate(.cgPoint, &axTopLeft) else { return -2 }
+        return Int(AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value).rawValue)
     }
 
-    private static func setWindowSize(_ window: AXUIElement, size: CGSize) {
+    @discardableResult
+    private static func setWindowSize(_ window: AXUIElement, size: CGSize) -> Int {
         var dimensions = size
-        guard let value = AXValueCreate(.cgSize, &dimensions) else { return }
-        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+        guard let value = AXValueCreate(.cgSize, &dimensions) else { return -2 }
+        return Int(AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value).rawValue)
     }
 
     private static func disableEnhancedUIIfNeeded(_ appElement: AXUIElement) -> Bool {

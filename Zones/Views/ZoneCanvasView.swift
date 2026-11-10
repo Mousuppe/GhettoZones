@@ -264,6 +264,3 @@ struct ZoneCanvasView: View {
     }
 }
 
-private enum ResizeHandle: CaseIterable {
-    case topLeft, top, topRight, left, right, bottomLeft, bottom, bottomRight
-}

@@ -27,6 +27,9 @@
 		AA0000010000000000000016 /* AccessibilityChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000016 /* AccessibilityChecker.swift */; };
 		AA0000010000000000000018 /* CGEventTapMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000018 /* CGEventTapMonitor.swift */; };
 		AA0000010000000000000019 /* WindowAccessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000019 /* WindowAccessibility.swift */; };
+		AA000001000000000000001A /* SnapDebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001000000000000001A /* SnapDebugLog.swift */; };
+		AA000001000000000000001B /* ZoneEdgeSnapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001000000000000001B /* ZoneEdgeSnapper.swift */; };
+		AA000001000000000000001C /* ZoneScreenEditorWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000001000000000000001C /* ZoneScreenEditorWindow.swift */; };
 		AA0000010000000000000015 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000015 /* Assets.xcassets */; };
 		AA0000010000000000000017 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000017 /* AppIcon.icns */; };
 		AA0000010000000000000010 /* default-layouts.json in Resources */ = {isa = PBXBuildFile; fileRef = BB0000010000000000000010 /* default-layouts.json */; };
@@ -55,6 +58,9 @@
 		BB0000010000000000000016 /* AccessibilityChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityChecker.swift; sourceTree = "<group>"; };
 		BB0000010000000000000018 /* CGEventTapMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CGEventTapMonitor.swift; sourceTree = "<group>"; };
 		BB0000010000000000000019 /* WindowAccessibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowAccessibility.swift; sourceTree = "<group>"; };
+		BB000001000000000000001A /* SnapDebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapDebugLog.swift; sourceTree = "<group>"; };
+		BB000001000000000000001B /* ZoneEdgeSnapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoneEdgeSnapper.swift; sourceTree = "<group>"; };
+		BB000001000000000000001C /* ZoneScreenEditorWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoneScreenEditorWindow.swift; sourceTree = "<group>"; };
 		BB0000010000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BB0000010000000000000017 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		BB0000010000000000000010 /* default-layouts.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "default-layouts.json"; sourceTree = "<group>"; };
@@ -139,6 +145,7 @@
 				BB000001000000000000000E /* SettingsView.swift */,
 				BB000001000000000000000F /* ZoneOverlayView.swift */,
 				BB0000010000000000000013 /* LayoutIconView.swift */,
+				BB000001000000000000001C /* ZoneScreenEditorWindow.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -160,6 +167,8 @@
 				BB0000010000000000000016 /* AccessibilityChecker.swift */,
 				BB0000010000000000000018 /* CGEventTapMonitor.swift */,
 				BB0000010000000000000019 /* WindowAccessibility.swift */,
+				BB000001000000000000001A /* SnapDebugLog.swift */,
+				BB000001000000000000001B /* ZoneEdgeSnapper.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -258,6 +267,9 @@
 				AA0000010000000000000016 /* AccessibilityChecker.swift in Sources */,
 				AA0000010000000000000018 /* CGEventTapMonitor.swift in Sources */,
 				AA0000010000000000000019 /* WindowAccessibility.swift in Sources */,
+				AA000001000000000000001A /* SnapDebugLog.swift in Sources */,
+				AA000001000000000000001B /* ZoneEdgeSnapper.swift in Sources */,
+				AA000001000000000000001C /* ZoneScreenEditorWindow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

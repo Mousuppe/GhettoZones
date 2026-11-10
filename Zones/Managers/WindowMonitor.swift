@@ -42,8 +42,13 @@ final class WindowMonitor {
     func start(zoneManager: ZoneManager) {
         self.zoneManager = zoneManager
         stop()
+        SnapDebugLog.clear()
+        SnapDebugLog.log(
+            "WindowMonitor start snapping=\(zoneManager.snappingEnabled) ax=\(zoneManager.isAccessibilityGranted) displays=\(zoneManager.displayManager.displays.count)"
+        )
         setupOverlayWindows()
         startEventTap()
+        SnapDebugLog.log("eventTap running=\(eventTapMonitor?.isRunning == true) fallback=\(fallbackMouseMonitor != nil)")
     }
 
     func stop() {
@@ -76,8 +81,11 @@ final class WindowMonitor {
             .leftMouseUp,
             .flagsChanged
         ]) { [weak self] event, type in
+            // Capture location/flags immediately — the CGEvent may be reused after the tap returns.
+            let point = type == .flagsChanged ? NSEvent.mouseLocation : event.appKitScreenPoint
+            let commandPressed = event.isCommandPressed
             DispatchQueue.main.async {
-                self?.handleCGEvent(event, type: type)
+                self?.handleCGEvent(type: type, point: point, commandPressed: commandPressed)
             }
         }
 
@@ -114,7 +122,6 @@ final class WindowMonitor {
 
     @MainActor
     private func handleNSEvent(_ event: NSEvent) {
-        guard let cgEvent = event.cgEvent else { return }
         let type: CGEventType
         switch event.type {
         case .leftMouseDown: type = .leftMouseDown
@@ -123,7 +130,11 @@ final class WindowMonitor {
         case .flagsChanged: type = .flagsChanged
         default: return
         }
-        handleCGEvent(cgEvent, type: type)
+        handleCGEvent(
+            type: type,
+            point: NSEvent.mouseLocation,
+            commandPressed: event.modifierFlags.contains(.command)
+        )
     }
 
     var isListeningForDragEvents: Bool {
@@ -131,21 +142,19 @@ final class WindowMonitor {
     }
 
     @MainActor
-    private func handleCGEvent(_ event: CGEvent, type: CGEventType) {
+    private func handleCGEvent(type: CGEventType, point: NSPoint, commandPressed: Bool) {
         guard let zoneManager, zoneManager.snappingEnabled, zoneManager.isAccessibilityGranted else { return }
 
         if !isListeningForDragEvents {
             startEventTap()
         }
 
-        let point = pointerLocation(for: event, type: type)
-
         switch type {
         case .leftMouseDown:
             isLeftMouseDown = true
             windowLookupAttempts = 0
             captureDraggedWindow(at: point)
-            if event.isCommandPressed {
+            if commandPressed {
                 commandInvolvedInDrag = true
                 beginCommandDragIfNeeded()
             }
@@ -153,7 +162,7 @@ final class WindowMonitor {
         case .leftMouseDragged:
             isLeftMouseDown = true
             resolveDraggedWindowIfNeeded(at: point)
-            if event.isCommandPressed {
+            if commandPressed {
                 commandInvolvedInDrag = true
                 refreshDraggedWindowDuringCommandDrag(at: point)
                 beginCommandDragIfNeeded()
@@ -166,11 +175,16 @@ final class WindowMonitor {
             isLeftMouseDown = false
             resolveDraggedWindowIfNeeded(at: point)
             ensureDraggedWindowForSnap(at: point)
+            SnapDebugLog.log(
+                "mouseUp point=\(point) cmdDrag=\(commandInvolvedInDrag) active=\(isCommandDragActive) hover=\(String(describing: lastHoveredZoneID)) pending=\(pendingSnapContext != nil) pid=\(String(describing: draggedWindowPID)) shouldSnap=\(shouldSnapOnRelease)"
+            )
             if commandInvolvedInDrag || isCommandDragActive {
                 refreshSnapTargetAtRelease(at: point)
             }
             if shouldSnapOnRelease {
                 performSnap(at: point)
+            } else {
+                SnapDebugLog.log("mouseUp skipped snap (shouldSnapOnRelease=false)")
             }
             finishCommandDragSession()
             resetDragState()
@@ -178,13 +192,16 @@ final class WindowMonitor {
         case .flagsChanged:
             guard isLeftMouseDown else { return }
             resolveDraggedWindowIfNeeded(at: point)
-            if event.isCommandPressed {
+            if commandPressed {
                 commandInvolvedInDrag = true
                 beginCommandDragIfNeeded()
                 continueCommandDrag(at: point)
             } else if isCommandDragActive || commandInvolvedInDrag {
                 ensureDraggedWindowForSnap(at: point)
                 refreshSnapTargetAtRelease(at: point)
+                SnapDebugLog.log(
+                    "commandRelease point=\(point) hover=\(String(describing: lastHoveredZoneID)) pending=\(pendingSnapContext != nil) shouldSnap=\(shouldSnapOnRelease)"
+                )
                 if shouldSnapOnRelease {
                     performSnap(at: point)
                 }
@@ -194,13 +211,6 @@ final class WindowMonitor {
         default:
             break
         }
-    }
-
-    private func pointerLocation(for event: CGEvent, type: CGEventType) -> NSPoint {
-        if type == .flagsChanged {
-            return NSEvent.mouseLocation
-        }
-        return event.appKitScreenPoint
     }
 
     private func refreshDraggedWindowDuringCommandDrag(at point: NSPoint) {
@@ -352,7 +362,13 @@ final class WindowMonitor {
     @MainActor
     private func performSnap(at point: NSPoint) {
         guard let zoneManager else { return }
-        guard let context = resolvedSnapContext(at: point, zoneManager: zoneManager) else { return }
+        guard let context = resolvedSnapContext(at: point, zoneManager: zoneManager) else {
+            SnapDebugLog.log("performSnap aborted — no snap context at \(point)")
+            return
+        }
+        SnapDebugLog.log(
+            "performSnap zone=\(context.zone.name) frame=\(context.frame) pid=\(String(describing: context.windowPID)) bundle=\(context.bundleID ?? "nil") hasWindow=\(context.window != nil)"
+        )
         scheduleSnap(context, zoneManager: zoneManager)
     }
 
@@ -467,9 +483,21 @@ final class WindowMonitor {
 
     @MainActor
     private static func applySnap(_ context: SnapContext, zoneManager: ZoneManager, attempt: Int, remember: Bool = true) {
-        guard let window = resolveWindow(for: context, attempt: attempt) else { return }
-        let success = WindowAccessibility.setWindowFrame(window, frame: context.frame)
-        if success, remember, attempt == 0, let bundleID = context.bundleID, !bundleID.isEmpty {
+        guard let window = resolveWindow(for: context, attempt: attempt) else {
+            SnapDebugLog.log("applySnap attempt=\(attempt) — resolveWindow returned nil")
+            guard attempt + 1 < snapRetryDelays.count else { return }
+            let delay = snapRetryDelays[attempt + 1] - snapRetryDelays[attempt]
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(delay))
+                applySnap(context, zoneManager: zoneManager, attempt: attempt + 1, remember: remember)
+            }
+            return
+        }
+        let result = WindowAccessibility.setWindowFrameDetailed(window, frame: context.frame)
+        SnapDebugLog.log(
+            "applySnap attempt=\(attempt) success=\(result.success) before=\(String(describing: result.before)) after=\(String(describing: result.after)) target=\(context.frame) sizeErr=\(result.sizeError) posErr=\(result.positionError)"
+        )
+        if result.success, remember, let bundleID = context.bundleID, !bundleID.isEmpty {
             zoneManager.rememberPosition(
                 bundleIdentifier: bundleID,
                 zone: context.zone,
@@ -477,7 +505,7 @@ final class WindowMonitor {
                 displayID: context.displayID
             )
         }
-        guard !success, attempt + 1 < snapRetryDelays.count else { return }
+        guard !result.success, attempt + 1 < snapRetryDelays.count else { return }
         let delay = snapRetryDelays[attempt + 1] - snapRetryDelays[attempt]
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(delay))
