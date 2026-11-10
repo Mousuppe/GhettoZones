@@ -37,6 +37,8 @@ BUILD="$(/usr/bin/defaults read "$APP_SRC/Contents/Info" CFBundleVersion 2>/dev/
 PKG_VERSION="${VERSION}.${BUILD}"
 PKG_NAME="GhettoZones-${VERSION}.pkg"
 PKG_PATH="$DIST_DIR/$PKG_NAME"
+ZIP_NAME="GhettoZones-${VERSION}.zip"
+ZIP_PATH="$DIST_DIR/$ZIP_NAME"
 
 echo "==> Staging payload (version $VERSION build $BUILD)"
 mkdir -p "$PAYLOAD_ROOT/Applications"
@@ -55,7 +57,7 @@ mkdir -p "$STAGE_SCRIPTS"
 /bin/chmod 755 "$STAGE_SCRIPTS/postinstall"
 
 mkdir -p "$DIST_DIR"
-/bin/rm -f "$PKG_PATH"
+/bin/rm -f "$PKG_PATH" "$ZIP_PATH"
 
 echo "==> Creating $PKG_PATH"
 /usr/bin/pkgbuild \
@@ -66,10 +68,17 @@ echo "==> Creating $PKG_PATH"
   --version "$PKG_VERSION" \
   "$PKG_PATH"
 
+echo "==> Creating $ZIP_PATH (easier Gatekeeper workaround than .pkg)"
+(
+  cd "$PAYLOAD_ROOT/Applications"
+  /usr/bin/ditto -c -k --keepParent "GhettoZones.app" "$ZIP_PATH"
+)
+
 echo "==> Done"
 echo "Package: $PKG_PATH"
-echo "Size:    $(/usr/bin/du -h "$PKG_PATH" | /usr/bin/awk '{print $1}')"
+echo "Zip:     $ZIP_PATH"
+echo "Sizes:   $(/usr/bin/du -h "$PKG_PATH" "$ZIP_PATH" | /usr/bin/awk '{print $1}' | /usr/bin/paste -sd ' / ' -)"
 echo
-echo "Share notes:"
-echo "  • Recipients may need right-click → Open on the .pkg (unsigned / no Dev ID)."
-echo "  • After install, enable Accessibility for GhettoZones in System Settings."
+echo "Share notes (no Apple Developer ID):"
+echo "  • Prefer the .zip for coworkers — see README Gatekeeper steps."
+echo "  • After first launch, enable Accessibility for GhettoZones."

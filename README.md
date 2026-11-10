@@ -14,21 +14,38 @@ GhettoZones lets you define custom screen zones and snap windows into them using
 | **Xcode 15+** | Required to build the app from source (or use the `.pkg` below) |
 | **Accessibility permission** | Required so GhettoZones can move and resize windows |
 
-### Install from `.pkg` (share with friends)
+### Install without Xcode (share with friends)
 
-Build an installer that copies the app into `/Applications`:
+Build distributables:
 
 ```bash
 ./Scripts/build-pkg.sh
 ```
 
-The package lands in `dist/GhettoZones-1.0.pkg`. Recipients can double-click it to install.
+This writes:
 
-Because the build is **not** Apple Developer ID–signed:
+- `dist/GhettoZones-1.0.zip` — **preferred** for coworkers (drag `GhettoZones.app` into `/Applications`)
+- `dist/GhettoZones-1.0.pkg` — installs into `/Applications` automatically
 
-1. First open of the `.pkg` (or the app) may need **right-click → Open**.
-2. After install, enable **GhettoZones** under **System Settings → Privacy & Security → Accessibility**.
+The build is **ad-hoc signed** (no Apple Developer ID), so macOS Gatekeeper blocks a normal double-click with only **Move to Trash** / **Done**. Use one of these:
 
+**Option A — Privacy & Security (GUI)**  
+1. Click **Done** on the warning.  
+2. Open **System Settings → Privacy & Security**.  
+3. Scroll to **Security** and click **Open Anyway** next to the GhettoZones message.  
+4. Confirm again when asked.
+
+**Option B — Terminal (clears the download quarantine)**  
+```bash
+xattr -cr ~/Downloads/GhettoZones-1.0.zip   # or .pkg
+open ~/Downloads/GhettoZones-1.0.zip
+```
+
+**Option C — AirDrop / USB** instead of downloading from the browser (often avoids the block).
+
+After the app launches, enable **GhettoZones** under **System Settings → Privacy & Security → Accessibility**.
+
+To remove Gatekeeper friction entirely later, you need an Apple Developer account, Developer ID signing, and notarization.
 ### 1. Get the code
 
 ```bash
