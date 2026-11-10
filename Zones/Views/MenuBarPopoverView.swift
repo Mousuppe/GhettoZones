@@ -47,6 +47,18 @@ struct MenuBarPopoverView: View {
 
             Toggle(NSLocalizedString("Snapping Enabled", comment: "Snapping toggle"), isOn: $zoneManager.snappingEnabled)
 
+            if zoneManager.snappingEnabled {
+                Picker(
+                    NSLocalizedString("Snap Motion", comment: "Animated vs instant snap"),
+                    selection: $zoneManager.animateWindowSnapping
+                ) {
+                    Text(NSLocalizedString("Animated", comment: "Animate window into zone")).tag(true)
+                    Text(NSLocalizedString("Instant", comment: "Snap window into zone immediately")).tag(false)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
             if zoneManager.snappingEnabled && !zoneManager.isAccessibilityGranted {
                 Text(NSLocalizedString("Grant Accessibility access in Settings to enable snapping.", comment: "Snapping blocked without accessibility"))
                     .font(.caption)

@@ -11,8 +11,23 @@ GhettoZones lets you define custom screen zones and snap windows into them using
 | Requirement | Why |
 |-------------|-----|
 | **macOS 13 Ventura** or later | Minimum supported OS |
-| **Xcode 15+** | Required to build the app from source (no pre-built release yet) |
+| **Xcode 15+** | Required to build the app from source (or use the `.pkg` below) |
 | **Accessibility permission** | Required so GhettoZones can move and resize windows |
+
+### Install from `.pkg` (share with friends)
+
+Build an installer that copies the app into `/Applications`:
+
+```bash
+./Scripts/build-pkg.sh
+```
+
+The package lands in `dist/GhettoZones-1.0.pkg`. Recipients can double-click it to install.
+
+Because the build is **not** Apple Developer ID–signed:
+
+1. First open of the `.pkg` (or the app) may need **right-click → Open**.
+2. After install, enable **GhettoZones** under **System Settings → Privacy & Security → Accessibility**.
 
 ### 1. Get the code
 

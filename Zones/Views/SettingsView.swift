@@ -30,6 +30,26 @@ struct SettingsView: View {
             Section {
                 Toggle(NSLocalizedString("Enable Snapping", comment: "Settings toggle"), isOn: $zoneManager.snappingEnabled)
 
+                Picker(
+                    NSLocalizedString("Snap Motion", comment: "Animated vs instant snap"),
+                    selection: $zoneManager.animateWindowSnapping
+                ) {
+                    Text(NSLocalizedString("Animated", comment: "Animate window into zone"))
+                        .tag(true)
+                    Text(NSLocalizedString("Instant", comment: "Snap window into zone immediately"))
+                        .tag(false)
+                }
+                .pickerStyle(.segmented)
+                .disabled(!zoneManager.snappingEnabled)
+
+                Text(
+                    zoneManager.animateWindowSnapping
+                        ? NSLocalizedString("Windows ease into the target zone.", comment: "Animated snap help")
+                        : NSLocalizedString("Windows jump straight to the target zone.", comment: "Instant snap help")
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
                 HStack {
                     Text(NSLocalizedString("Activation Threshold", comment: "Drag threshold setting"))
                     Slider(

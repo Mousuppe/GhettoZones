@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import QuartzCore
 
 enum WindowAccessibility {
     /// Returns the standard window under the cursor, using AX first then CGWindowList.
@@ -217,10 +218,15 @@ enum WindowAccessibility {
         return windows.first(where: isResizableWindow(_:))
     }
 
-    private static func framesMatch(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat = 4) -> Bool {
+    static func framesMatch(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat = 4) -> Bool {
         abs(lhs.origin.x - rhs.origin.x) <= tolerance
             && abs(lhs.origin.y - rhs.origin.y) <= tolerance
             && abs(lhs.width - rhs.width) <= tolerance
+            && abs(lhs.height - rhs.height) <= tolerance
+    }
+
+    static func sizesMatch(_ lhs: CGSize, _ rhs: CGSize, tolerance: CGFloat = 8) -> Bool {
+        abs(lhs.width - rhs.width) <= tolerance
             && abs(lhs.height - rhs.height) <= tolerance
     }
 
@@ -280,8 +286,14 @@ enum WindowAccessibility {
         setWindowFrameDetailed(window, frame: frame).success
     }
 
+    /// Resize during a live title-bar drag without activating/raising (avoids fighting WindowServer).
     @discardableResult
-    static func setWindowFrameDetailed(_ window: AXUIElement, frame: CGRect) -> SetFrameResult {
+    static func setWindowFrameDuringDrag(_ window: AXUIElement, frame: CGRect) -> Bool {
+        setWindowFrameDetailed(window, frame: frame, prepare: false).success
+    }
+
+    @discardableResult
+    static func setWindowFrameDetailed(_ window: AXUIElement, frame: CGRect, prepare: Bool = true) -> SetFrameResult {
         let target = frame.integral
         let before = windowFrame(window)
 
@@ -289,15 +301,16 @@ enum WindowAccessibility {
         guard AXUIElementGetPid(window, &pid) == .success else {
             return SetFrameResult(success: false, before: before, after: nil, sizeError: -1, positionError: -1)
         }
-        if let app = NSRunningApplication(processIdentifier: pid) {
-            app.activate(options: [.activateAllWindows])
-        }
 
         let appElement = AXUIElementCreateApplication(pid)
-        let hadEnhancedUI = disableEnhancedUIIfNeeded(appElement)
-
-        // Raise the window so apps that ignore AX while backgrounded still accept resize.
-        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        var hadEnhancedUI = false
+        if prepare {
+            if let app = NSRunningApplication(processIdentifier: pid) {
+                app.activate(options: [.activateAllWindows])
+            }
+            hadEnhancedUI = disableEnhancedUIIfNeeded(appElement)
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        }
 
         let sizeError1 = setWindowSize(window, size: target.size)
         let positionError = setWindowPosition(window, appKitBottomLeft: target.origin, size: target.size)
@@ -305,7 +318,7 @@ enum WindowAccessibility {
         // Second position pass — some apps clamp the first move against the old size.
         let positionError2 = setWindowPosition(window, appKitBottomLeft: target.origin, size: target.size)
 
-        if hadEnhancedUI {
+        if prepare, hadEnhancedUI {
             AXUIElementSetAttributeValue(
                 appElement,
                 "AXEnhancedUserInterface" as CFString,
@@ -321,6 +334,110 @@ enum WindowAccessibility {
             after: after,
             sizeError: sizeError2 != 0 ? sizeError2 : sizeError1,
             positionError: positionError2 != 0 ? positionError2 : positionError
+        )
+    }
+
+    /// Ease the window from its current frame into `frame` using vsync-timed Accessibility ticks.
+    /// Uses one size + one position write per frame (no readbacks mid-animation) to reduce jitter.
+    @MainActor
+    static func setWindowFrameAnimated(
+        _ window: AXUIElement,
+        frame: CGRect,
+        duration: TimeInterval = 0.34
+    ) async -> SetFrameResult {
+        let target = roundedFrame(frame)
+        let start = roundedFrame(windowFrame(window) ?? target)
+
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else {
+            return SetFrameResult(success: false, before: start, after: nil, sizeError: -1, positionError: -1)
+        }
+
+        if let app = NSRunningApplication(processIdentifier: pid) {
+            app.activate(options: [.activateAllWindows])
+        }
+        let appElement = AXUIElementCreateApplication(pid)
+        let hadEnhancedUI = disableEnhancedUIIfNeeded(appElement)
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+
+        // Avoid animating when already there — jump would look like a flash of jitter.
+        if framesMatch(start, target, tolerance: 2) {
+            var result = setWindowFrameDetailed(window, frame: target, prepare: false)
+            result.before = start
+            if hadEnhancedUI {
+                AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            }
+            return result
+        }
+
+        let startTime = CACurrentMediaTime()
+        let fps: Double = 60
+        var frameIndex = 0
+
+        while true {
+            if Task.isCancelled { break }
+
+            let elapsed = CACurrentMediaTime() - startTime
+            let linear = min(1, CGFloat(elapsed / max(duration, 0.001)))
+            let eased = smoothstep(linear)
+            let intermediate = roundedFrame(lerp(from: start, to: target, t: eased))
+            applyAnimationTick(window, from: start, to: intermediate)
+
+            if linear >= 1 { break }
+
+            frameIndex += 1
+            let nextTime = startTime + (Double(frameIndex) / fps)
+            let delay = max(0, nextTime - CACurrentMediaTime())
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } else {
+                // We're behind — skip sleeping and catch up to wall clock on the next loop.
+                frameIndex = Int((CACurrentMediaTime() - startTime) * fps)
+            }
+        }
+
+        var result = setWindowFrameDetailed(window, frame: target, prepare: false)
+        // Preserve the true pre-animation frame for restore-on-drag.
+        result.before = start
+        if hadEnhancedUI {
+            AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
+        return result
+    }
+
+    /// Single size + position write for animation frames. Order depends on grow vs shrink.
+    private static func applyAnimationTick(_ window: AXUIElement, from start: CGRect, to frame: CGRect) {
+        let growing = frame.width * frame.height >= start.width * start.height - 1
+        if growing {
+            _ = setWindowSize(window, size: frame.size)
+            _ = setWindowPosition(window, appKitBottomLeft: frame.origin, size: frame.size)
+        } else {
+            _ = setWindowPosition(window, appKitBottomLeft: frame.origin, size: frame.size)
+            _ = setWindowSize(window, size: frame.size)
+        }
+    }
+
+    private static func roundedFrame(_ frame: CGRect) -> CGRect {
+        CGRect(
+            x: frame.origin.x.rounded(.toNearestOrAwayFromZero),
+            y: frame.origin.y.rounded(.toNearestOrAwayFromZero),
+            width: max(1, frame.size.width.rounded(.toNearestOrAwayFromZero)),
+            height: max(1, frame.size.height.rounded(.toNearestOrAwayFromZero))
+        )
+    }
+
+    private static func smoothstep(_ t: CGFloat) -> CGFloat {
+        let x = min(max(t, 0), 1)
+        // Smoother ease-in-out than cubic ease-out — reduces end-of-animation AX thrash.
+        return x * x * (3 - 2 * x)
+    }
+
+    private static func lerp(from: CGRect, to: CGRect, t: CGFloat) -> CGRect {
+        CGRect(
+            x: from.origin.x + (to.origin.x - from.origin.x) * t,
+            y: from.origin.y + (to.origin.y - from.origin.y) * t,
+            width: from.size.width + (to.size.width - from.size.width) * t,
+            height: from.size.height + (to.size.height - from.size.height) * t
         )
     }
 

@@ -1,0 +1,11 @@
+#!/bin/bash
+# Open GhettoZones after install so the menu bar icon appears.
+set -euo pipefail
+
+APP="/Applications/GhettoZones.app"
+
+if [[ -d "$APP" ]]; then
+  /usr/bin/open "$APP" || true
+fi
+
+exit 0

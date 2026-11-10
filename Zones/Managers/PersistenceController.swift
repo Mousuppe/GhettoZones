@@ -4,6 +4,7 @@ import Foundation
 
 extension Defaults.Keys {
     static let snappingEnabled = Key<Bool>("snappingEnabled", default: true)
+    static let animateWindowSnapping = Key<Bool>("animateWindowSnapping", default: true)
     static let activationThresholdMs = Key<Int>("activationThresholdMs", default: 300)
     static let activeLayoutIDs = Key<[String: String]>("activeLayoutIDs", default: [:])
     static let appZoneBindings = Key<[AppZoneBinding]>("appZoneBindings", default: [])

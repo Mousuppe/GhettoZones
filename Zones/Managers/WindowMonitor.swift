@@ -23,6 +23,10 @@ final class WindowMonitor {
     private var lastHoveredDisplayID: CGDirectDisplayID?
     private var draggedWindowPID: pid_t?
     private var pendingSnapContext: SnapContext?
+    private var snapTask: Task<Void, Never>?
+    private var dragStartPoint: NSPoint?
+    private var didRestorePreSnapSize = false
+    private var preSnapFrames: [PreSnapRecord] = []
 
     private struct SnapContext {
         let window: AXUIElement?
@@ -35,7 +39,15 @@ final class WindowMonitor {
         let fallbackFrame: CGRect?
     }
 
-    private static let snapRetryDelays: [TimeInterval] = [0.12, 0.2, 0.35, 0.5, 0.75, 1.0, 1.5]
+    /// Remembers the window's free size before a zone snap so a later drag can restore it.
+    private struct PreSnapRecord {
+        let pid: pid_t
+        var previousFrame: CGRect
+        var snappedFrame: CGRect
+    }
+
+    private static let snapRetryDelays: [TimeInterval] = [0.08, 0.18, 0.3, 0.45, 0.65, 0.9, 1.2]
+    private static let restoreDragThreshold: CGFloat = 4
 
     private init() {}
 
@@ -52,6 +64,8 @@ final class WindowMonitor {
     }
 
     func stop() {
+        snapTask?.cancel()
+        snapTask = nil
         eventTapMonitor?.stop()
         eventTapMonitor = nil
         stopFallbackMonitors()
@@ -153,6 +167,8 @@ final class WindowMonitor {
         case .leftMouseDown:
             isLeftMouseDown = true
             windowLookupAttempts = 0
+            didRestorePreSnapSize = false
+            dragStartPoint = point
             captureDraggedWindow(at: point)
             if commandPressed {
                 commandInvolvedInDrag = true
@@ -162,6 +178,7 @@ final class WindowMonitor {
         case .leftMouseDragged:
             isLeftMouseDown = true
             resolveDraggedWindowIfNeeded(at: point)
+            maybeRestorePreSnapSize(at: point)
             if commandPressed {
                 commandInvolvedInDrag = true
                 refreshDraggedWindowDuringCommandDrag(at: point)
@@ -236,7 +253,11 @@ final class WindowMonitor {
     private func assignDraggedWindow(_ window: AXUIElement, pid: pid_t? = nil) {
         draggedWindow = window
         draggedBundleID = bundleIdentifier(for: window)
-        initialWindowFrame = WindowAccessibility.windowFrame(window)
+        // Freeze free size at first capture of this gesture — later lookups must not
+        // overwrite with a mid-drag / post-snap frame or restore remembers the zone size.
+        if initialWindowFrame == nil {
+            initialWindowFrame = WindowAccessibility.windowFrame(window)
+        }
         if let pid {
             draggedWindowPID = pid
         } else {
@@ -293,6 +314,118 @@ final class WindowMonitor {
         lastHoveredDisplayID = nil
         draggedWindowPID = nil
         pendingSnapContext = nil
+        dragStartPoint = nil
+        didRestorePreSnapSize = false
+    }
+
+    // MARK: - Pre-snap size restore
+
+    func rememberPreSnapFrame(pid: pid_t, previous: CGRect?, snapped: CGRect) {
+        guard pid > 0, let previous else {
+            SnapDebugLog.log("rememberPreSnap skipped pid=\(pid) previousNil=\(previous == nil)")
+            return
+        }
+        // Already snapped → snapped again: keep the original free size, update zone frame only.
+        if let existingIndex = preSnapFrames.firstIndex(where: { $0.pid == pid }) {
+            let existing = preSnapFrames[existingIndex]
+            if WindowAccessibility.sizesMatch(existing.snappedFrame.size, previous.size, tolerance: 24)
+                || WindowAccessibility.sizesMatch(previous.size, snapped.size, tolerance: 24) {
+                preSnapFrames[existingIndex].snappedFrame = snapped
+                SnapDebugLog.log(
+                    "rememberPreSnap updateSnapOnly pid=\(pid) previous=\(existing.previousFrame.size) snapped=\(snapped.size)"
+                )
+                return
+            }
+            preSnapFrames[existingIndex] = PreSnapRecord(pid: pid, previousFrame: previous, snappedFrame: snapped)
+            SnapDebugLog.log("rememberPreSnap replace pid=\(pid) previous=\(previous.size) snapped=\(snapped.size)")
+            return
+        }
+        if WindowAccessibility.sizesMatch(previous.size, snapped.size, tolerance: 24) {
+            SnapDebugLog.log("rememberPreSnap skipSameSize pid=\(pid) size=\(previous.size)")
+            return
+        }
+        preSnapFrames.append(PreSnapRecord(pid: pid, previousFrame: previous, snappedFrame: snapped))
+        SnapDebugLog.log(
+            "rememberPreSnap store pid=\(pid) previous=\(previous.size) snapped=\(snapped.size) count=\(preSnapFrames.count)"
+        )
+        if preSnapFrames.count > 40 {
+            preSnapFrames.removeFirst(preSnapFrames.count - 40)
+        }
+    }
+
+    @MainActor
+    private func maybeRestorePreSnapSize(at point: NSPoint) {
+        guard !didRestorePreSnapSize else { return }
+        guard let start = dragStartPoint else { return }
+        let distance = hypot(point.x - start.x, point.y - start.y)
+        guard distance >= Self.restoreDragThreshold else { return }
+
+        guard let window = draggedWindow ?? resolveWindowForSnap(at: point),
+              let current = WindowAccessibility.windowFrame(window) else {
+            SnapDebugLog.log("restorePreSnap noWindow point=\(point)")
+            return
+        }
+
+        var pid: pid_t = draggedWindowPID ?? 0
+        if pid == 0 {
+            _ = AXUIElementGetPid(window, &pid)
+        }
+        guard pid > 0, let index = preSnapFrames.firstIndex(where: { $0.pid == pid }) else {
+            // Only log once per gesture once we've moved far enough; keep trying if pid resolves later.
+            if pid > 0 {
+                SnapDebugLog.log("restorePreSnap noRecord pid=\(pid) records=\(preSnapFrames.count)")
+                didRestorePreSnapSize = true
+            }
+            return
+        }
+
+        let record = preSnapFrames[index]
+        let previous = record.previousFrame
+        let looksSnapped = WindowAccessibility.sizesMatch(current.size, record.snappedFrame.size, tolerance: 48)
+            || (
+                abs(current.height - record.snappedFrame.height) <= 48
+                && abs(current.width - previous.width) > 24
+            )
+            || (
+                abs(current.width - record.snappedFrame.width) <= 48
+                && abs(current.height - previous.height) > 24
+            )
+        guard looksSnapped else {
+            SnapDebugLog.log(
+                "restorePreSnap notSnapped pid=\(pid) current=\(current.size) snapped=\(record.snappedFrame.size) previous=\(previous.size)"
+            )
+            // Don't burn the one-shot flag — window under cursor may still resolve next tick.
+            return
+        }
+        guard previous.width > 50, previous.height > 50 else { return }
+        guard !WindowAccessibility.sizesMatch(current.size, previous.size, tolerance: 8) else {
+            preSnapFrames.remove(at: index)
+            didRestorePreSnapSize = true
+            SnapDebugLog.log("restorePreSnap alreadyFree pid=\(pid)")
+            return
+        }
+
+        // Keep the cursor on the same relative spot of the title bar while restoring size.
+        let relativeX = current.width > 0 ? (point.x - current.minX) / current.width : 0.5
+        let clampedRelativeX = min(max(relativeX, 0.05), 0.95)
+        let offsetFromTop = current.maxY - point.y
+        let restoredSize = previous.size
+        let newMaxY = point.y + offsetFromTop
+        let restoredFrame = CGRect(
+            x: point.x - clampedRelativeX * restoredSize.width,
+            y: newMaxY - restoredSize.height,
+            width: restoredSize.width,
+            height: restoredSize.height
+        )
+
+        didRestorePreSnapSize = true
+        preSnapFrames.remove(at: index)
+        snapTask?.cancel()
+
+        // Instant restore without activate/raise — those fight the live title-bar drag.
+        SnapDebugLog.log("restorePreSnap apply pid=\(pid) from=\(current) to=\(restoredFrame)")
+        let ok = WindowAccessibility.setWindowFrameDuringDrag(window, frame: restoredFrame)
+        SnapDebugLog.log("restorePreSnap result ok=\(ok) after=\(String(describing: WindowAccessibility.windowFrame(window)?.size))")
     }
 
     @MainActor
@@ -482,21 +615,56 @@ final class WindowMonitor {
     }
 
     @MainActor
-    private static func applySnap(_ context: SnapContext, zoneManager: ZoneManager, attempt: Int, remember: Bool = true) {
+    private static func applySnap(
+        _ context: SnapContext,
+        zoneManager: ZoneManager,
+        attempt: Int,
+        remember: Bool = true,
+        animated: Bool
+    ) async {
         guard let window = resolveWindow(for: context, attempt: attempt) else {
             SnapDebugLog.log("applySnap attempt=\(attempt) — resolveWindow returned nil")
             guard attempt + 1 < snapRetryDelays.count else { return }
             let delay = snapRetryDelays[attempt + 1] - snapRetryDelays[attempt]
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(delay))
-                applySnap(context, zoneManager: zoneManager, attempt: attempt + 1, remember: remember)
-            }
+            try? await Task.sleep(for: .seconds(delay))
+            await applySnap(
+                context,
+                zoneManager: zoneManager,
+                attempt: attempt + 1,
+                remember: remember,
+                animated: animated
+            )
             return
         }
-        let result = WindowAccessibility.setWindowFrameDetailed(window, frame: context.frame)
+
+        // Capture free size BEFORE mutating — animated snaps otherwise report "before" as the last tick.
+        let preSnapFrame = context.fallbackFrame ?? WindowAccessibility.windowFrame(window)
+        let pid = context.windowPID ?? {
+            var value: pid_t = 0
+            _ = AXUIElementGetPid(window, &value)
+            return value > 0 ? value : nil
+        }()
+
+        let result: WindowAccessibility.SetFrameResult
+        if animated, attempt == 0 {
+            result = await WindowAccessibility.setWindowFrameAnimated(window, frame: context.frame)
+        } else {
+            result = WindowAccessibility.setWindowFrameDetailed(window, frame: context.frame)
+        }
+
         SnapDebugLog.log(
-            "applySnap attempt=\(attempt) success=\(result.success) before=\(String(describing: result.before)) after=\(String(describing: result.after)) target=\(context.frame) sizeErr=\(result.sizeError) posErr=\(result.positionError)"
+            "applySnap attempt=\(attempt) animated=\(animated) success=\(result.success) preSnap=\(String(describing: preSnapFrame)) before=\(String(describing: result.before)) after=\(String(describing: result.after)) target=\(context.frame) sizeErr=\(result.sizeError) posErr=\(result.positionError)"
         )
+
+        // Remember only after a successful snap, using the real landed size (not the ideal zone rect).
+        if result.success, let pid {
+            WindowMonitor.shared.rememberPreSnapFrame(
+                pid: pid,
+                previous: preSnapFrame,
+                snapped: result.after ?? context.frame
+            )
+        }
+
         if result.success, remember, let bundleID = context.bundleID, !bundleID.isEmpty {
             zoneManager.rememberPosition(
                 bundleIdentifier: bundleID,
@@ -507,10 +675,14 @@ final class WindowMonitor {
         }
         guard !result.success, attempt + 1 < snapRetryDelays.count else { return }
         let delay = snapRetryDelays[attempt + 1] - snapRetryDelays[attempt]
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(delay))
-            applySnap(context, zoneManager: zoneManager, attempt: attempt + 1, remember: remember)
-        }
+        try? await Task.sleep(for: .seconds(delay))
+        await applySnap(
+            context,
+            zoneManager: zoneManager,
+            attempt: attempt + 1,
+            remember: remember,
+            animated: false
+        )
     }
 
     private static func resolveWindow(for context: SnapContext, attempt: Int) -> AXUIElement? {
@@ -660,9 +832,19 @@ final class WindowMonitor {
     @MainActor
     private func scheduleSnap(_ context: SnapContext, zoneManager: ZoneManager, remember: Bool = true) {
         let captured = context
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(Self.snapRetryDelays[0]))
-            Self.applySnap(captured, zoneManager: zoneManager, attempt: 0, remember: remember)
+        let animated = zoneManager.animateWindowSnapping
+        let initialDelay: TimeInterval = animated ? 0.04 : Self.snapRetryDelays[0]
+        snapTask?.cancel()
+        snapTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(initialDelay))
+            guard !Task.isCancelled else { return }
+            await Self.applySnap(
+                captured,
+                zoneManager: zoneManager,
+                attempt: 0,
+                remember: remember,
+                animated: animated
+            )
         }
     }
 
@@ -695,7 +877,13 @@ final class WindowMonitor {
             width: newWidth,
             height: newHeight
         )
-        WindowAccessibility.setWindowFrame(window, frame: newFrame)
+        if zoneManager.animateWindowSnapping {
+            Task { @MainActor in
+                _ = await WindowAccessibility.setWindowFrameAnimated(window, frame: newFrame)
+            }
+        } else {
+            WindowAccessibility.setWindowFrame(window, frame: newFrame)
+        }
     }
 
     // MARK: - Overlay

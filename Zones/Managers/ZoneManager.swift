@@ -11,6 +11,9 @@ final class ZoneManager: ObservableObject {
     @Published var snappingEnabled: Bool = Defaults[.snappingEnabled] {
         didSet { Defaults[.snappingEnabled] = snappingEnabled }
     }
+    @Published var animateWindowSnapping: Bool = Defaults[.animateWindowSnapping] {
+        didSet { Defaults[.animateWindowSnapping] = animateWindowSnapping }
+    }
     @Published var activationThresholdMs: Int = Defaults[.activationThresholdMs] {
         didSet { Defaults[.activationThresholdMs] = activationThresholdMs }
     }
@@ -62,6 +65,7 @@ final class ZoneManager: ObservableObject {
         layouts = persistence.loadLayouts()
         bindings = persistence.loadBindings()
         snappingEnabled = Defaults[.snappingEnabled]
+        animateWindowSnapping = Defaults[.animateWindowSnapping]
         activationThresholdMs = Defaults[.activationThresholdMs]
         refreshPermissionState()
         ensureLayoutsForDisplays(displayManager.displays)
